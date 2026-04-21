@@ -534,7 +534,10 @@
     <div id="kill-feed"></div>
     <div id="damage-overlay"></div>
     <div id="hud-ladder-hint">▲ W / SPACE to climb · S to descend ▼</div>
-    <div id="hud-grenades"><span class="ico">💣</span><span id="hud-grenade-count">3</span> / 3</div>
+    <div id="hud-grenades">
+      <span class="ico">💣</span><span id="hud-grenade-count">3</span> / 3
+      &nbsp;&nbsp;<span class="ico" style="color:#ff8844">🔥</span><span id="hud-molotov-count">2</span> / 2
+    </div>
     <div id="medpack-bar-label">APPLYING MED PACK</div>
     <div id="medpack-bar"><div id="medpack-bar-fill"></div></div>
   </div>
@@ -638,8 +641,9 @@
     const NET_TICK_MS = 1000 / NET_TICK_RATE;
     const RESPAWN_TIME = 3;
     // Map is now twice as long along Z (length). X stays the same width.
-    const WORLD_HALF_X = 100;
-    const WORLD_HALF_Z = 200;         // DOUBLED LENGTH (was 100)
+    // Map enlarged ~1.5x in both directions for more breathing room.
+    const WORLD_HALF_X = 150;
+    const WORLD_HALF_Z = 270;
     // Backwards-compat alias (some helpers still use the square value as a
     // generic "half world" — kept as the smaller of the two so legacy clamps
     // never go out of bounds).
@@ -677,7 +681,14 @@
       // Extended (new southern half — doubled length)
       { x:  40, z:-120 }, { x: -40, z:-120 },
       { x:   0, z:-150 }, { x:  60, z:-170 }, { x: -60, z:-170 },
-      { x:  80, z:-110 }, { x: -80, z:-110 }
+      { x:  80, z:-110 }, { x: -80, z:-110 },
+      // Outer frontier (added with the bigger map)
+      { x: 115, z:   0 }, { x:-115, z:   0 },
+      { x: 115, z:  90 }, { x:-115, z: -90 },
+      { x:  20, z: 220 }, { x: -20, z: 220 },
+      { x:  20, z:-220 }, { x: -20, z:-220 },
+      { x: 110, z: 230 }, { x:-110, z: 230 },
+      { x: 110, z:-230 }, { x:-110, z:-230 }
     ];
 
     // Returns a SPAWN_POINTS entry whose XZ footprint does not overlap any
@@ -1495,9 +1506,10 @@
         const sandMat = this.makeMat({ color: 0x8a7548, roughness: 0.95 });
         const ladderMat = this.makeMat({ color: 0x8a6a3c, roughness: 0.85, metalness: 0.2 });
 
-        // Floor — 220 x 420 (length doubled along Z)
-        const FLOOR_W = 220;             // X
-        const FLOOR_L = 420;             // Z (doubled)
+        // Floor — sized to match world bounds with a small buffer so the
+        // playable area always sits on solid ground.
+        const FLOOR_W = WORLD_HALF_X * 2 + 20;   // X (was 220)
+        const FLOOR_L = WORLD_HALF_Z * 2 + 20;   // Z (was 420)
         this.createBox(FLOOR_W, 1, FLOOR_L, 0, -0.5, 0, floorMat, true);
 
         const grid = new THREE.GridHelper(FLOOR_L, FLOOR_L / 2, 0x3e4a66, 0x273146);
@@ -1505,12 +1517,14 @@
         this.scene.add(grid);
         this.meshes.push(grid);
 
-        // Perimeter walls — rectangle, length doubled on Z
-        const WX = 100, WZ = 200, H = 10, T = 1;
-        this.createBox(FLOOR_W + 2, H, T, 0, H / 2, -WZ, wallMat); // south
-        this.createBox(FLOOR_W + 2, H, T, 0, H / 2,  WZ, wallMat); // north
-        this.createBox(T, H, FLOOR_L, -WX, H / 2, 0, wallMat);     // west
-        this.createBox(T, H, FLOOR_L,  WX, H / 2, 0, wallMat);     // east
+        // Perimeter walls — flush with the world bounds (previously the
+        // walls were inset from the floor, leaving a gap players could
+        // see / partially fall into). Now WX/WZ match WORLD_HALF_*.
+        const WX = WORLD_HALF_X, WZ = WORLD_HALF_Z, H = 12, T = 1;
+        this.createBox(WX * 2 + T * 2, H, T, 0, H / 2, -WZ, wallMat); // south
+        this.createBox(WX * 2 + T * 2, H, T, 0, H / 2,  WZ, wallMat); // north
+        this.createBox(T, H, WZ * 2 + T * 2, -WX, H / 2, 0, wallMat); // west
+        this.createBox(T, H, WZ * 2 + T * 2,  WX, H / 2, 0, wallMat); // east
 
         // ---- Central plaza ----
         this.createBox(22, 1.2, 22, 0, 0.6, 0, accentMat);
@@ -1706,6 +1720,57 @@
         this.createBox(1.2, 3.0, 30, -40, 1.5, -150, wallMat);
         this.createBox(1.2, 3.0, 30,  40, 1.5, -150, wallMat);
 
+        // ============================================================
+        // OUTER FRONTIER ZONES — added with the bigger map (|X|>100, |Z|>200)
+        // Sparse cover to make the new ground worth fighting over.
+        // ============================================================
+
+        // East / West frontier strips (X around ±125)
+        for (let z = -240; z <= 240; z += 30) {
+          this.createBox(2.4, 2.4, 2.4, -125, 1.2, z, crateMat);
+          this.createBox(2.4, 2.4, 2.4,  125, 1.2, z, crateMat);
+        }
+        // Twin frontier bunkers
+        this.createBuilding(-125,  60, 14, 12, 5, wallMat, roofMat, 'east');
+        this.createBuilding( 125, -60, 14, 12, 5, wallMat, roofMat, 'west');
+        this.createLadder(-125 + 7.2,  60, 5, 'east', ladderMat);
+        this.createLadder( 125 - 7.2, -60, 5, 'west', ladderMat);
+
+        // North / South far plazas (Z around ±240)
+        this.createBox(28, 1.0, 28, 0, 0.5,  240, accentMat);
+        this.createBox(28, 1.0, 28, 0, 0.5, -240, accentMat);
+        const farTowerH = 11;
+        this.createBox(5, farTowerH, 5,  0, farTowerH / 2,  240, blueMat);
+        this.createBox(5, farTowerH, 5,  0, farTowerH / 2, -240, redMat);
+        this.createBox(7, 0.5, 7, 0, farTowerH + 0.25,  240, accentMat);
+        this.createBox(7, 0.5, 7, 0, farTowerH + 0.25, -240, accentMat);
+        this.createLadder(0,  240 + 2.6, farTowerH, 'north', ladderMat);
+        this.createLadder(0, -240 - 2.6, farTowerH, 'south', ladderMat);
+
+        // Diagonal sniper nests in the far corners
+        const frontierCorners = [
+          [-130,  240, blueMat], [ 130,  240, redMat],
+          [-130, -240, redMat],  [ 130, -240, blueMat]
+        ];
+        for (const [cx, cz, mat] of frontierCorners) {
+          const h = 7;
+          this.createBox(6, h, 6, cx, h / 2, cz, mat);
+          this.createBox(8, 0.5, 8, cx, h + 0.25, cz, accentMat);
+          const faceX = cx < 0 ? cx + 3.1 : cx - 3.1;
+          this.createLadder(faceX, cz, h, cx < 0 ? 'east' : 'west', ladderMat);
+        }
+
+        // A few extra crate clusters scattered through the new outer ring
+        const frontierCrates = [
+          [-100, 220, 1.6], [ 100, 220, 1.6],
+          [-100,-220, 1.6], [ 100,-220, 1.6],
+          [ -60, 240, 2.0], [  60, 240, 2.0],
+          [ -60,-240, 2.0], [  60,-240, 2.0]
+        ];
+        for (const [x, z, h] of frontierCrates) {
+          this.createBox(2.4, h, 2.4, x, h / 2, z, crateMat);
+        }
+
         // ---- Lighting ----
         const ambient = new THREE.AmbientLight(0x556080, 0.7);
         this.scene.add(ambient);
@@ -1719,11 +1784,11 @@
         sun.shadow.mapSize.width = 1024;
         sun.shadow.mapSize.height = 1024;
         sun.shadow.camera.near = 1;
-        sun.shadow.camera.far = 460;
-        sun.shadow.camera.left = -120;
-        sun.shadow.camera.right = 120;
-        sun.shadow.camera.top = 220;
-        sun.shadow.camera.bottom = -220;
+        sun.shadow.camera.far = 620;
+        sun.shadow.camera.left = -170;
+        sun.shadow.camera.right = 170;
+        sun.shadow.camera.top = 290;
+        sun.shadow.camera.bottom = -290;
         this.scene.add(sun);
         this.sun = sun;
 
@@ -1891,6 +1956,7 @@
       sendDied(data) { this.send('died', data); }
       sendRespawn() { this.send('respawn', {}); }
       sendGrenade(data) { this.send('grenade', data); }
+      sendMolotov(data) { this.send('molotov', data); }
       sendHealthUpdate(health) { this.send('healthUpdate', { health }); }
 
       startPing() {
@@ -1982,6 +2048,9 @@
             break;
           case 'grenade':
             this.emit('remoteGrenade', d);
+            break;
+          case 'molotov':
+            this.emit('remoteMolotov', d);
             break;
           case 'shoot':
             this.emit('remoteShoot', d);
@@ -3087,11 +3156,20 @@
 
       applyWeapon() {
         const d = this.def;
+        // Persist per-weapon ammo so swapping weapons can't be used to skip
+        // reloading. The first time a weapon is equipped it gets a full mag
+        // and reserve; after that we restore whatever was left.
+        if (!this.state._ammoByWeapon) this.state._ammoByWeapon = {};
+        const id = this.state.currentWeaponId;
+        const saved = this.state._ammoByWeapon[id];
+
         if (d.isMedpack) {
-          // Preserve charges across reselects? Simpler: keep current count if defined, else max.
           if (this.state._medCharges == null) this.state._medCharges = d.magSize;
           this.state.ammo = this.state._medCharges;
           this.state.reserveAmmo = 0;
+        } else if (saved) {
+          this.state.ammo = saved.ammo;
+          this.state.reserveAmmo = saved.reserveAmmo;
         } else {
           this.state.ammo = d.magSize;
           this.state.reserveAmmo = d.magSize * 4;
@@ -3104,6 +3182,19 @@
         this.state.healTimer = 0;
         this.recoilYaw = 0;
         this.recoilPitch = 0;
+      }
+
+      // Save current ammo for the active weapon so the next applyWeapon()
+      // call can restore it. Also called on respawn-reset.
+      saveCurrentAmmo() {
+        if (!this.state._ammoByWeapon) this.state._ammoByWeapon = {};
+        const id = this.state.currentWeaponId;
+        const d = this.def;
+        if (d.isMedpack) return;
+        this.state._ammoByWeapon[id] = {
+          ammo: this.state.ammo,
+          reserveAmmo: this.state.reserveAmmo
+        };
       }
 
       buildGun() {
@@ -3425,22 +3516,40 @@
         if (this._wasDead) {
           this.state._medCharges = WEAPONS.medpack.magSize;
           if (d.isMedpack) this.state.ammo = this.state._medCharges;
+          // Reset per-weapon ammo cache so each life starts with full mags.
+          this.state._ammoByWeapon = {};
+          if (!d.isMedpack) {
+            this.state.ammo = d.magSize;
+            this.state.reserveAmmo = d.magSize * 4;
+          }
         }
         this._wasDead = false;
 
-        let switched = false;
+        // Anti-cheat: pressing the same digit / scrolling to the same weapon
+        // must NOT refill ammo. Track the index BEFORE applying input and only
+        // re-equip when the slot actually changes.
+        const prevWeaponIndex = this.weaponIndex;
+        let requested = this.weaponIndex;
         if (this.input.scrollDelta !== 0) {
-          this.weaponIndex = (this.weaponIndex + Math.sign(this.input.scrollDelta) + this.weaponIds.length) % this.weaponIds.length;
-          switched = true;
+          requested = (requested + Math.sign(this.input.scrollDelta) + this.weaponIds.length) % this.weaponIds.length;
         }
         for (let i = 0; i < this.weaponIds.length; i++) {
           if (this.input.isKeyPressed('Digit' + (i + 1))) {
-            this.weaponIndex = i;
-            switched = true;
+            requested = i;
           }
         }
-        if (switched) {
+        if (requested !== prevWeaponIndex) {
+          // Save the OUTGOING weapon's ammo before swapping in the new one,
+          // otherwise switching weapons would silently refill the previous
+          // mag the next time it's reselected.
+          this.saveCurrentAmmo();
+          this.weaponIndex = requested;
           s.currentWeaponId = this.weaponIds[this.weaponIndex];
+          // Cancel any in-progress reload / heal when actually switching.
+          s.isReloading = false;
+          s.reloadTimer = 0;
+          s.isHealing = false;
+          s.healTimer = 0;
           this.applyWeapon();
           this.buildGun();
           if (SOUND) SOUND.switchWeapon();
@@ -3598,7 +3707,7 @@
     }
 
     // ============================================================
-    // GRENADES (frag, max 3, 'G' to throw)
+    // GRENADES (frag, max 3, 'G' to throw) + MOLOTOVS ('F' to throw)
     // ============================================================
     const GRENADE_MAX = 3;
     const GRENADE_FUSE = 2.5;          // seconds before detonation
@@ -3609,6 +3718,16 @@
     const GRENADE_BOUNCE = 0.35;
     const GRENADE_SIZE = 0.12;
     const GRENADE_THROW_COOLDOWN = 0.45;
+
+    // ---- Molotov ----
+    const MOLOTOV_MAX = 2;             // max carried
+    const MOLOTOV_FUSE = 1.4;          // shorter fuse — bottle breaks on impact
+    const MOLOTOV_FIRE_RADIUS = 4.5;   // size of fire patch
+    const MOLOTOV_FIRE_DURATION = 6;   // seconds the fire burns
+    const MOLOTOV_DPS = 32;            // damage per second standing inside
+    const MOLOTOV_THROW_SPEED = 18;
+    const MOLOTOV_THROW_COOLDOWN = 0.6;
+    const MOLOTOV_IMPACT_DAMAGE = 25;  // small instant damage on direct hit
 
     // ---------- DESTRUCTION TUNING ----------
     const HOLE_RADIUS_FACTOR = 1.0;     // multiplier on grenade radius for cratering
@@ -4041,11 +4160,30 @@
         this._aabb = new THREE.Vector3();
         this.remoteGrenades = []; // visual-only grenades from other players
 
+        // ---- Molotov state ----
+        this.molotovCount = MOLOTOV_MAX;
+        this.molotovCooldown = 0;
+        this.activeMolotovs = [];   // in-flight bottles (local thrower)
+        this.remoteMolotovs = [];   // in-flight bottles thrown by others
+        this.fires = [];            // { x, y, z, t, life, mesh, ownerId, light, fromRemote }
+
+        // Bottle visuals
+        this._bottleGeo = new THREE.CylinderGeometry(0.07, 0.09, 0.28, 8);
+        this._bottleMat = new THREE.MeshStandardMaterial({ color: 0x88aa55, roughness: 0.3, metalness: 0.1, transparent: true, opacity: 0.85 });
+        // Fire patch visuals (a flat disc with an animated material)
+        this._fireGeo = new THREE.CircleGeometry(MOLOTOV_FIRE_RADIUS, 24);
+        this._fireGeo.rotateX(-Math.PI / 2);
+        this._fireMat = new THREE.MeshBasicMaterial({ color: 0xff7733, transparent: true, opacity: 0.75, depthWrite: false });
+
         // Listen for remote grenade events
         if (network && !network.offlineMode) {
           network.on('remoteGrenade', d => {
             if (d.senderId === network.localId) return;
             this._spawnRemoteGrenade(d);
+          });
+          network.on('remoteMolotov', d => {
+            if (d.senderId === network.localId) return;
+            this._spawnRemoteMolotov(d);
           });
         }
       }
@@ -4054,6 +4192,147 @@
         this.count = GRENADE_MAX;
         for (const g of this.active) this.scene.remove(g.mesh);
         this.active.length = 0;
+        this.molotovCount = MOLOTOV_MAX;
+        for (const m of this.activeMolotovs) this.scene.remove(m.mesh);
+        for (const m of this.remoteMolotovs) this.scene.remove(m.mesh);
+        for (const f of this.fires) this.scene.remove(f.mesh);
+        this.activeMolotovs.length = 0;
+        this.remoteMolotovs.length = 0;
+        this.fires.length = 0;
+      }
+
+      throwMolotov() {
+        if (this.molotovCount <= 0 || this.molotovCooldown > 0) return;
+        if (this.player.state.isDead) return;
+        this.molotovCount--;
+        this.molotovCooldown = MOLOTOV_THROW_COOLDOWN;
+        if (SOUND) SOUND.grenadeThrow();
+
+        const ps = this.player.state;
+        const fx = -Math.sin(ps.yaw) * Math.cos(ps.pitch);
+        const fy = Math.sin(ps.pitch) + 0.25;
+        const fz = -Math.cos(ps.yaw) * Math.cos(ps.pitch);
+        const len = Math.hypot(fx, fy, fz) || 1;
+
+        const mesh = new THREE.Mesh(this._bottleGeo, this._bottleMat);
+        const eyeY = ps.position.y - PLAYER_HEIGHT + this.player.eyeHeight;
+        mesh.position.set(ps.position.x + (fx / len) * 0.4, eyeY, ps.position.z + (fz / len) * 0.4);
+        this.scene.add(mesh);
+
+        const vel = new THREE.Vector3(
+          (fx / len) * MOLOTOV_THROW_SPEED + ps.velocity.x * 0.4,
+          (fy / len) * MOLOTOV_THROW_SPEED * 0.7 + ps.velocity.y * 0.4,
+          (fz / len) * MOLOTOV_THROW_SPEED + ps.velocity.z * 0.4
+        );
+        this.activeMolotovs.push({ mesh, vel, t: 0 });
+
+        if (this.network && this.network.connected) {
+          this.network.sendMolotov({
+            senderId: this.network.localId,
+            px: mesh.position.x, py: mesh.position.y, pz: mesh.position.z,
+            vx: vel.x, vy: vel.y, vz: vel.z
+          });
+        }
+      }
+
+      _spawnRemoteMolotov(d) {
+        const mesh = new THREE.Mesh(this._bottleGeo, this._bottleMat);
+        mesh.position.set(d.px, d.py, d.pz);
+        this.scene.add(mesh);
+        this.remoteMolotovs.push({
+          mesh,
+          vel: new THREE.Vector3(d.vx, d.vy, d.vz),
+          t: 0,
+          fromRemote: true
+        });
+      }
+
+      _igniteFire(pos, fromRemote) {
+        if (SOUND) SOUND.explosionAt(pos);
+        const mesh = new THREE.Mesh(this._fireGeo, this._fireMat.clone());
+        mesh.position.set(pos.x, Math.max(0.05, pos.y - 0.1), pos.z);
+        this.scene.add(mesh);
+        const light = new THREE.PointLight(0xff7733, 1.4, MOLOTOV_FIRE_RADIUS * 2.5);
+        light.position.copy(mesh.position);
+        light.position.y += 1;
+        this.scene.add(light);
+        this.fires.push({
+          x: pos.x, y: pos.y, z: pos.z,
+          t: 0, life: MOLOTOV_FIRE_DURATION,
+          mesh, light, fromRemote: !!fromRemote
+        });
+        // Direct-impact damage on local player
+        if (!fromRemote) {
+          const ps = this.player.state;
+          if (!ps.isDead) {
+            const d = pos.distanceTo(ps.position);
+            if (d < MOLOTOV_FIRE_RADIUS * 0.6) this.player.takeDamage(MOLOTOV_IMPACT_DAMAGE, 'Molotov');
+          }
+        } else {
+          // remote-thrown: also apply direct hit locally
+          const ps = this.player.state;
+          if (!ps.isDead) {
+            const d = pos.distanceTo(ps.position);
+            if (d < MOLOTOV_FIRE_RADIUS * 0.6) this.player.takeDamage(MOLOTOV_IMPACT_DAMAGE, 'Molotov');
+          }
+        }
+      }
+
+      _stepBottle(arr, dt, fromRemote) {
+        for (let i = arr.length - 1; i >= 0; i--) {
+          const m = arr[i];
+          m.t += dt;
+          m.vel.y += GRENADE_GRAVITY * dt;
+          this._collide(m, dt);
+          m.mesh.rotation.x += dt * 8;
+          m.mesh.rotation.z += dt * 4;
+          const onGround = m.mesh.position.y <= 0.2 && Math.abs(m.vel.y) < 1.5;
+          if (m.t >= MOLOTOV_FUSE || onGround) {
+            this._igniteFire(m.mesh.position.clone(), fromRemote);
+            this.scene.remove(m.mesh);
+            arr.splice(i, 1);
+          }
+        }
+      }
+
+      _stepFires(dt) {
+        const ps = this.player.state;
+        for (let i = this.fires.length - 1; i >= 0; i--) {
+          const f = this.fires[i];
+          f.t += dt;
+          // animate flicker
+          const flicker = 0.55 + Math.random() * 0.35;
+          f.mesh.material.opacity = flicker * Math.max(0, 1 - f.t / f.life);
+          f.mesh.scale.setScalar(0.9 + Math.sin(f.t * 8 + i) * 0.08);
+          if (f.light) f.light.intensity = flicker * 1.6 * Math.max(0, 1 - f.t / f.life);
+
+          // Damage local player while inside the fire
+          if (!ps.isDead) {
+            const dx = ps.position.x - f.x;
+            const dz = ps.position.z - f.z;
+            if (Math.hypot(dx, dz) < MOLOTOV_FIRE_RADIUS && Math.abs(ps.position.y - PLAYER_HEIGHT - f.y) < 2.5) {
+              this.player.takeDamage(MOLOTOV_DPS * dt, 'Molotov');
+            }
+          }
+          // Damage bots only if WE threw it (avoid double-damage in MP)
+          if (!f.fromRemote && this.bots && this.bots.bots) {
+            for (const bot of this.bots.bots) {
+              if (bot.dead) continue;
+              const dx = bot.px - f.x, dz = bot.pz - f.z;
+              if (Math.hypot(dx, dz) < MOLOTOV_FIRE_RADIUS && Math.abs(bot.py - f.y) < 3) {
+                const killed = this.bots.damageBot(bot.id, MOLOTOV_DPS * dt);
+                if (killed) this.player.state.kills++;
+              }
+            }
+          }
+
+          if (f.t >= f.life) {
+            this.scene.remove(f.mesh);
+            if (f.light) this.scene.remove(f.light);
+            f.mesh.material.dispose();
+            this.fires.splice(i, 1);
+          }
+        }
       }
 
       throwGrenade() {
@@ -4211,15 +4490,23 @@
 
       update(dt) {
         if (this.cooldown > 0) this.cooldown -= dt;
+        if (this.molotovCooldown > 0) this.molotovCooldown -= dt;
 
         // Refill grenades on respawn
         if (this._wasDead && !this.player.state.isDead) {
           this.count = GRENADE_MAX;
+          this.molotovCount = MOLOTOV_MAX;
         }
         this._wasDead = this.player.state.isDead;
 
-        // 'G' to throw
+        // 'G' to throw frag, 'F' to throw molotov
         if (this.input.isKeyPressed('KeyG')) this.throwGrenade();
+        if (this.input.isKeyPressed('KeyF')) this.throwMolotov();
+
+        // Step molotov bottles + active fires
+        this._stepBottle(this.activeMolotovs, dt, false);
+        this._stepBottle(this.remoteMolotovs, dt, true);
+        this._stepFires(dt);
 
         // Step grenades
         for (let i = this.active.length - 1; i >= 0; i--) {
@@ -4251,7 +4538,10 @@
           }
         }
 
-        // Step remote grenades (visual only — no damage)
+        // Step remote grenades — full visual explosion + apply damage
+        // locally so that other players' grenades can actually kill you.
+        // (The thrower's client only knows about its own player + bots, so
+        // every receiver must compute its own self-damage on detonation.)
         for (let i = this.remoteGrenades.length - 1; i >= 0; i--) {
           const g = this.remoteGrenades[i];
           g.t += dt;
@@ -4261,15 +4551,36 @@
           g.mesh.rotation.y += dt * 4;
 
           if (g.t >= GRENADE_FUSE) {
-            // Visual explosion only (damage was handled by the thrower's client)
             const pos = g.mesh.position.clone();
+            // Same flash sphere as the local explosion so other players
+            // can clearly see incoming grenades go off.
             const flash = new THREE.Mesh(this._flashGeo, this._flashMat.clone());
             flash.position.copy(pos);
             flash.scale.setScalar(0.6);
             this.scene.add(flash);
             this._flashes.push({ mesh: flash, t: 0, life: 0.45 });
-            if (SOUND) SOUND.explosionAt(pos);
+
+            // Full audio (3D positional + global rumble) so the explosion
+            // is unmistakable.
+            if (SOUND) {
+              SOUND.explosion();
+              SOUND.explosionAt(pos);
+            }
+
+            // Cratering / destruction
             if (this.destruction) this.destruction.applyBlast(pos, GRENADE_RADIUS, 1);
+
+            // Damage the LOCAL player from a remote grenade
+            const ps = this.player.state;
+            if (!ps.isDead) {
+              const d = pos.distanceTo(ps.position);
+              if (d < GRENADE_RADIUS) {
+                const falloff = 1 - (d / GRENADE_RADIUS);
+                const dmg = GRENADE_MAX_DAMAGE * falloff * falloff;
+                this.player.takeDamage(dmg, 'Grenade');
+              }
+            }
+
             this.scene.remove(g.mesh);
             this.remoteGrenades.splice(i, 1);
           }
@@ -4312,6 +4623,7 @@
           scoreboardBody: document.getElementById('scoreboard-body'),
           crosshair: document.getElementById('crosshair'),
           grenadeCount: document.getElementById('hud-grenade-count'),
+          molotovCount: document.getElementById('hud-molotov-count'),
           medBar: document.getElementById('medpack-bar'),
           medBarFill: document.getElementById('medpack-bar-fill'),
           medBarLabel: document.getElementById('medpack-bar-label')
@@ -4465,6 +4777,9 @@
         // Grenade count
         if (this.grenades && this.el.grenadeCount) {
           this.el.grenadeCount.textContent = this.grenades.count;
+          if (this.el.molotovCount) {
+            this.el.molotovCount.textContent = this.grenades.molotovCount ?? 0;
+          }
         }
 
         if (this.damageTimer > 0) {
@@ -5098,4 +5413,3 @@
   </script>
 </body>
 </html>
-
