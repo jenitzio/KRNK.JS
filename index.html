@@ -573,7 +573,7 @@
     <button id="btn-offline">Offline Mode</button>
     <div class="controls-hint">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move ·
-      <kbd>Space</kbd> Jump / Climb ·
+      <kbd>Space</kbd> Jump / Wall-Jump / Climb ·
       <kbd>Shift</kbd> Crouch<br>
       <kbd>LMB</kbd> Shoot ·
       <kbd>RMB</kbd> Aim ·
@@ -1090,11 +1090,21 @@
           canvas,
           antialias: false,
           powerPreference: 'high-performance',
-          stencil: false
+          stencil: false,
+          depth: true,
+          alpha: false,
+          preserveDrawingBuffer: false
         });
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+        // PERF: cap device pixel ratio. Without this a Retina display renders
+        // 4x the pixels of a 1080p screen — for an FPS game this often halves
+        // the frame rate with no visible quality difference at gameplay distance.
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
         this.renderer.shadowMap.enabled = settings.get('shadowsEnabled');
         this.renderer.shadowMap.type = THREE.BasicShadowMap;
+        // PERF: skip auto-updating shadow maps every frame when the sun is static.
+        this.renderer.shadowMap.autoUpdate = true; // keep true for now (lighting may change)
+        this.renderer.info.autoReset = true;
         this.systems = [];
         this.running = false;
         this._lastRenderTime = 0;
@@ -2022,6 +2032,66 @@
 
         // Cache world mesh list for raycaster (only meshes, not grid helper)
         this.bulletTargetMeshes = this.meshes.filter(m => m.isMesh);
+
+        // ---- PERF: Spatial hash grid for fast collider broadphase ----
+        // Player physics, step-up, wall-jump probing all iterate map.colliders
+        // every frame. With hundreds of boxes that's hundreds of AABB tests.
+        // The grid lets us only test colliders in the player's neighborhood.
+        this._buildSpatialGrid();
+      }
+
+      _buildSpatialGrid() {
+        const CELL = 8; // metres
+        this._gridCell = CELL;
+        this._grid = new Map();
+        const put = (key, c) => {
+          let arr = this._grid.get(key);
+          if (!arr) { arr = []; this._grid.set(key, arr); }
+          arr.push(c);
+        };
+        for (let i = 0; i < this.colliders.length; i++) {
+          const c = this.colliders[i];
+          const x0 = Math.floor(c.minX / CELL);
+          const x1 = Math.floor(c.maxX / CELL);
+          const z0 = Math.floor(c.minZ / CELL);
+          const z1 = Math.floor(c.maxZ / CELL);
+          for (let gx = x0; gx <= x1; gx++) {
+            for (let gz = z0; gz <= z1; gz++) {
+              put(gx + ',' + gz, c);
+            }
+          }
+        }
+        this._queryScratch = [];
+        this._querySeen = new Set();
+      }
+
+      // Returns an array of colliders that may overlap the AABB
+      // (minX..maxX, minZ..maxZ). Cheap broadphase — the caller still
+      // does the precise AABB / Y test as before.
+      queryColliders(minX, maxX, minZ, maxZ) {
+        const CELL = this._gridCell;
+        const out = this._queryScratch;
+        out.length = 0;
+        const seen = this._querySeen;
+        seen.clear();
+        const x0 = Math.floor(minX / CELL);
+        const x1 = Math.floor(maxX / CELL);
+        const z0 = Math.floor(minZ / CELL);
+        const z1 = Math.floor(maxZ / CELL);
+        const grid = this._grid;
+        for (let gx = x0; gx <= x1; gx++) {
+          for (let gz = z0; gz <= z1; gz++) {
+            const arr = grid.get(gx + ',' + gz);
+            if (!arr) continue;
+            for (let i = 0; i < arr.length; i++) {
+              const c = arr[i];
+              if (seen.has(c)) continue;
+              seen.add(c);
+              out.push(c);
+            }
+          }
+        }
+        return out;
       }
     }
 
@@ -2352,6 +2422,23 @@
         this.slideDirZ = 0;
         this.slideTilt = 0;          // smoothed extra roll/dip while sliding
 
+        // ---- Wall-jump / wall-slide ----
+        // Touching a vertical wall while airborne lets the player kick off it
+        // (Space) or slide down it slowly. A short cooldown prevents infinite
+        // climbs on the same wall, and we track which wall was last used so
+        // each kick must come from a different surface.
+        this.WALL_JUMP_VEL    = 11.0;   // upward burst on wall-kick
+        this.WALL_PUSH_VEL    = 9.0;    // outward (away from wall) burst
+        this.WALL_SLIDE_GRAV  = 0.35;   // gravity multiplier while wall-sliding
+        this.WALL_SLIDE_MAX   = -4.5;   // clamp downward velocity while sliding
+        this.WALL_JUMP_LOCK   = 0.18;   // brief input/air-control reduction after kick
+        this.WALL_REUSE_TIME  = 0.25;   // seconds before same wall can be re-used
+        this.wallContact      = null;   // { nx, nz, collider } when touching a wall
+        this.wallJumpLock     = 0;      // counts down — reduces air control
+        this.lastWallCollider = null;
+        this.lastWallUsedTime = 0;
+        this._wallProbeT      = 0;      // throttle probe frequency
+
         // Reusable scratch vectors to avoid allocations
         this._forward = new THREE.Vector3();
         this._right = new THREE.Vector3();
@@ -2413,20 +2500,26 @@
         const feetY = this.getFeetY();
         const headY = p.y;
 
-        const colliders = this.map.colliders;
-        for (let i = 0; i < colliders.length; i++) {
+        // PERF: use spatial-grid broadphase if available, else fall back
+        // to the full collider list (preserves behaviour on older maps).
+        const colliders = this.map.queryColliders
+          ? this.map.queryColliders(minX, maxX, minZ, maxZ)
+          : this.map.colliders;
+        const vel = this.state.velocity;
+        const isXAxis = axis === 'x';
+        for (let i = 0, n = colliders.length; i < n; i++) {
           const c = colliders[i];
           if (headY <= c.minY || feetY >= c.maxY) continue;
           if (!aabbIntersects2D(minX, maxX, minZ, maxZ, c)) continue;
 
-          if (axis === 'x') {
+          if (isXAxis) {
             if (amount > 0) p.x = c.minX - PLAYER_RADIUS;
             else if (amount < 0) p.x = c.maxX + PLAYER_RADIUS;
-            this.state.velocity.x = 0;
+            vel.x = 0;
           } else {
             if (amount > 0) p.z = c.minZ - PLAYER_RADIUS;
             else if (amount < 0) p.z = c.maxZ + PLAYER_RADIUS;
-            this.state.velocity.z = 0;
+            vel.z = 0;
           }
         }
       }
@@ -2434,9 +2527,13 @@
       tryStepUp(newX, newZ) {
         const currentFeet = this.getFeetY();
         let bestTop = null;
-        const colliders = this.map.colliders;
+        // PERF: only consider colliders near the candidate footprint.
+        const r = PLAYER_RADIUS + 0.05;
+        const colliders = this.map.queryColliders
+          ? this.map.queryColliders(newX - r, newX + r, newZ - r, newZ + r)
+          : this.map.colliders;
 
-        for (let i = 0; i < colliders.length; i++) {
+        for (let i = 0, n = colliders.length; i < n; i++) {
           const c = colliders[i];
           if (!boxContainsXZ(newX, newZ, c)) continue;
           const top = c.maxY;
@@ -2449,7 +2546,7 @@
         if (bestTop !== null) {
           // Make sure there is headroom
           const newHeadY = bestTop + PLAYER_HEIGHT;
-          for (let i = 0; i < colliders.length; i++) {
+          for (let i = 0, n = colliders.length; i < n; i++) {
             const c = colliders[i];
             if (c.minY >= newHeadY) continue;
             if (c.maxY <= bestTop + 0.01) continue;
@@ -2461,6 +2558,49 @@
           return true;
         }
         return false;
+      }
+
+      // Detect a vertical wall the player is pressed against.
+      // Returns { nx, nz, collider } where (nx, nz) is the outward normal
+      // (pointing away from the wall, into the player), or null.
+      findWallContact() {
+        const p = this.state.position;
+        const probe = PLAYER_RADIUS + 0.18;
+        const minX = p.x - probe, maxX = p.x + probe;
+        const minZ = p.z - probe, maxZ = p.z + probe;
+        const feetY = this.getFeetY();
+        const headY = p.y;
+
+        const colliders = this.map.queryColliders
+          ? this.map.queryColliders(minX, maxX, minZ, maxZ)
+          : this.map.colliders;
+
+        let best = null;
+        let bestDist = Infinity;
+        for (let i = 0, n = colliders.length; i < n; i++) {
+          const c = colliders[i];
+          // Wall must overlap the player's body vertically.
+          if (headY <= c.minY || feetY >= c.maxY) continue;
+          // Wall must be tall enough to count (skip small crates/decks).
+          if ((c.maxY - c.minY) < 1.4) continue;
+          if (!aabbIntersects2D(minX, maxX, minZ, maxZ, c)) continue;
+
+          // Closest point on this AABB (in XZ) to the player.
+          const cx = Math.max(c.minX, Math.min(p.x, c.maxX));
+          const cz = Math.max(c.minZ, Math.min(p.z, c.maxZ));
+          const dx = p.x - cx;
+          const dz = p.z - cz;
+          const d2 = dx * dx + dz * dz;
+          if (d2 >= bestDist) continue;
+          // Build outward normal — pick the dominant axis (X or Z face).
+          let nx, nz;
+          const adx = Math.abs(dx), adz = Math.abs(dz);
+          if (adx >= adz) { nx = dx >= 0 ? 1 : -1; nz = 0; }
+          else            { nx = 0; nz = dz >= 0 ? 1 : -1; }
+          bestDist = d2;
+          best = { nx, nz, collider: c };
+        }
+        return best;
       }
 
       resolveMovement(dt) {
@@ -2499,9 +2639,13 @@
 
         const feetY = this.getFeetY();
         let highestGround = 0;
-        const colliders = this.map.colliders;
+        // PERF: vertical resolve only cares about colliders directly under/above the player.
+        const r = PLAYER_RADIUS + 0.05;
+        const colliders = this.map.queryColliders
+          ? this.map.queryColliders(p.x - r, p.x + r, p.z - r, p.z + r)
+          : this.map.colliders;
 
-        for (let i = 0; i < colliders.length; i++) {
+        for (let i = 0, n = colliders.length; i < n; i++) {
           const c = colliders[i];
           if (!boxContainsXZ(p.x, p.z, c)) continue;
 
@@ -2708,15 +2852,65 @@
             }
           }
 
+          // ---- Jump (ground OR wall) ----
+          // Wall-jump: airborne, near a vertical wall, Space pressed. We push
+          // away from the wall + add an upward burst. A short re-use timer
+          // prevents trivially wall-climbing the same surface forever.
+          if (this.wallJumpLock > 0) this.wallJumpLock = Math.max(0, this.wallJumpLock - dt);
+
+          // Probe for a wall contact every other frame (cheap, but skip if grounded).
+          let wall = null;
+          if (!this.state.isGrounded) {
+            this._wallProbeT -= dt;
+            if (this._wallProbeT <= 0) {
+              this._wallProbeT = 0.04; // ~25 Hz
+              wall = this.findWallContact();
+              this.wallContact = wall;
+            } else {
+              wall = this.wallContact;
+            }
+          } else {
+            this.wallContact = null;
+            this._wallProbeT = 0;
+          }
+
           if (this.state.isGrounded && this.input.isKeyPressed('Space') && !this.isSliding) {
             this.state.velocity.y = this.JUMP;
             this.state.isGrounded = false;
             if (SOUND) SOUND.jump();
             // Allow jump-cancelling a slide implicitly (already not sliding because we check above)
+          } else if (
+            !this.state.isGrounded &&
+            wall &&
+            this.input.isKeyPressed('Space') &&
+            !this.isSliding &&
+            // Don't re-use the exact same wall instantly (forces alternation
+            // for proper wall-to-wall climbs, but allows normal scenarios).
+            (wall.collider !== this.lastWallCollider ||
+             (clock.elapsed - this.lastWallUsedTime) > this.WALL_REUSE_TIME)
+          ) {
+            // Kick off the wall — outward normal + upward burst.
+            this.state.velocity.x = wall.nx * this.WALL_PUSH_VEL;
+            this.state.velocity.z = wall.nz * this.WALL_PUSH_VEL;
+            this.state.velocity.y = this.WALL_JUMP_VEL;
+            this.wallJumpLock = this.WALL_JUMP_LOCK;
+            this.lastWallCollider = wall.collider;
+            this.lastWallUsedTime = clock.elapsed;
+            // Yaw briefly faces away from wall feels nicer in some games but
+            // would fight the player's mouse — leave yaw alone.
+            if (SOUND) SOUND.jump();
           }
 
           if (!this.state.isGrounded) {
-            this.state.velocity.y += this.GRAVITY * dt;
+            // Wall-slide: when pressed against a wall and falling, apply
+            // reduced gravity + clamp fall speed. Sprint+forward not required —
+            // any contact while airborne triggers the slide (feels good).
+            const sliding = wall && this.state.velocity.y < 0 && !this.isSliding;
+            const g = sliding ? this.GRAVITY * this.WALL_SLIDE_GRAV : this.GRAVITY;
+            this.state.velocity.y += g * dt;
+            if (sliding && this.state.velocity.y < this.WALL_SLIDE_MAX) {
+              this.state.velocity.y = this.WALL_SLIDE_MAX;
+            }
           }
         }
 
