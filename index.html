@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>KRNK.js — Multiplayer Ready</title>
+  <title>Learning</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -562,11 +562,12 @@
   </div>
 
   <div id="lock-screen">
-    <h1>KRNK.js</h1>
-    <div class="subtitle">Multiplayer Arena Shooter</div>
+    <h1>Learning-Guide</h1>
+    <div class="subtitle">Help for GCSE Exams</div>
     <input id="player-name-input" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off" spellcheck="false" />
-    <button id="btn-connect">Connect & Play</button>
-    <button id="btn-offline">Play Offline</button>
+    <input id="server-password-input" type="password" maxlength="32" placeholder="Server password" autocomplete="off" spellcheck="false" style="width:220px;padding:11px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;text-align:center;outline:none;margin-top:4px;" />
+    <button id="btn-connect">Connect</button>
+    <button id="btn-offline">Offline Mode</button>
     <div class="controls-hint">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move ·
       <kbd>Space</kbd> Jump / Climb ·
@@ -574,8 +575,8 @@
       <kbd>LMB</kbd> Shoot ·
       <kbd>RMB</kbd> Aim ·
       <kbd>R</kbd> Reload<br>
-      <kbd>1-8</kbd> / <kbd>Scroll</kbd> Switch Weapon ·
-      <kbd>G</kbd> Throw Grenade ·
+      <kbd>1-8</kbd> / <kbd>Scroll</kbd> Switch ·
+      <kbd>G</kbd> Throw ·
       <kbd>C</kbd> Crouch / Slide (while sprinting)<br>
       <kbd>Tab</kbd> Scoreboard ·
       <kbd>Esc</kbd> Settings
@@ -917,6 +918,97 @@
       medpackTick() { this._osc('square', 880, 0.002, 0.04, 0.10, 880); }
       medpackDone() { this._osc('sine', 660, 0.005, 0.18, 0.32, 990); }
       grenadePin()  { this._osc('square', 1800, 0.002, 0.06, 0.20, 1800); }
+
+      // --------------- 3D POSITIONAL AUDIO ---------------
+      // Call these for remote events with a world position.
+      // They create a short-lived PositionalAudio at the given coords.
+      _positional(pos, fn, refDist = 8, maxDist = 120) {
+        if (!this.ensure() || !this._listener) return;
+        const audio = new THREE.PositionalAudio(this._listener);
+        audio.setRefDistance(refDist);
+        audio.setMaxDistance(maxDist);
+        audio.setRolloffFactor(1.8);
+        // Create a tiny dummy object at the world position
+        const obj = new THREE.Object3D();
+        obj.position.set(pos.x, pos.y, pos.z);
+        if (this._scene) this._scene.add(obj);
+        obj.add(audio);
+        // Use the audio context to build the sound
+        const ctx = audio.context;
+        const gain = audio.getOutput();
+        fn(ctx, gain, audio);
+        // Auto-cleanup after 3 seconds
+        setTimeout(() => {
+          if (this._scene) this._scene.remove(obj);
+          try { audio.disconnect(); } catch {}
+        }, 3000);
+      }
+
+      gunshotAt(pos, weaponId) {
+        this._positional(pos, (ctx, dest) => {
+          const t = ctx.currentTime;
+          // Noise burst
+          const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.2), ctx.sampleRate);
+          const d = buf.getChannelData(0);
+          for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0.5, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.value = weaponId === 'sniper' ? 7000 : 4500;
+          src.connect(lp).connect(g).connect(dest);
+          src.start(t);
+          src.stop(t + 0.3);
+        }, 10, 150);
+      }
+
+      explosionAt(pos) {
+        this._positional(pos, (ctx, dest) => {
+          const t = ctx.currentTime;
+          // Low boom
+          const osc = ctx.createOscillator();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(120, t);
+          osc.frequency.exponentialRampToValueAtTime(25, t + 0.5);
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0.8, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+          osc.connect(g).connect(dest);
+          osc.start(t);
+          osc.stop(t + 0.7);
+          // Noise crackle
+          const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.8), ctx.sampleRate);
+          const d = buf.getChannelData(0);
+          for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+          const ns = ctx.createBufferSource();
+          ns.buffer = buf;
+          const ng = ctx.createGain();
+          ng.gain.setValueAtTime(0.7, t);
+          ng.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+          ns.connect(ng).connect(dest);
+          ns.start(t);
+          ns.stop(t + 0.8);
+        }, 12, 200);
+      }
+
+      collapseAt(pos) {
+        this._positional(pos, (ctx, dest) => {
+          const t = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(60, t);
+          osc.frequency.exponentialRampToValueAtTime(20, t + 1.8);
+          const g = ctx.createGain();
+          g.gain.setValueAtTime(0.7, t);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
+          osc.connect(g).connect(dest);
+          osc.start(t);
+          osc.stop(t + 2.1);
+        }, 15, 200);
+      }
     }
 
     // Module-singleton sound bus (created in bootstrap with settings)
@@ -1700,8 +1792,9 @@
         }
       }
 
-      connect(name) {
+      connect(name, password) {
         this.playerName = name;
+        this._serverPassword = password || '';
         this.offlineMode = false;
         this._shouldReconnect = true;
         this._reconnectAttempts = 0;
@@ -1720,7 +1813,7 @@
         this.ws.onopen = () => {
           this.connected = true;
           this._reconnectAttempts = 0;
-          this.send('join', { name: this.playerName });
+          this.send('join', { name: this.playerName, password: this._serverPassword || '' });
           this.startPing();
           this.emit('connected');
         };
@@ -1797,6 +1890,8 @@
       sendHit(data) { this.send('hit', data); }
       sendDied(data) { this.send('died', data); }
       sendRespawn() { this.send('respawn', {}); }
+      sendGrenade(data) { this.send('grenade', data); }
+      sendHealthUpdate(health) { this.send('healthUpdate', { health }); }
 
       startPing() {
         this.stopPing();
@@ -1885,8 +1980,24 @@
           case 'spawned':
             this.emit('spawned', d);
             break;
+          case 'grenade':
+            this.emit('remoteGrenade', d);
+            break;
+          case 'shoot':
+            this.emit('remoteShoot', d);
+            break;
+          case 'healthUpdate':
+            this.emit('healthUpdate', d);
+            break;
           case 'pong':
             this.pingMs = Math.round(performance.now() - (d.t || this._pingSentAt));
+            break;
+          case 'passwordRequired':
+          case 'wrongPassword':
+            this.emit(t, d);
+            break;
+          case 'mapReset':
+            this.emit('mapReset', d);
             break;
         }
       }
@@ -3261,6 +3372,7 @@
 
         if (this.network.connected) {
           this.network.sendShoot({
+            senderId: this.network.localId,
             ox: +this.rayOrigin.x.toFixed(2),
             oy: +this.rayOrigin.y.toFixed(2),
             oz: +this.rayOrigin.z.toFixed(2),
@@ -3370,6 +3482,12 @@
                 this.state._medCharges = s.ammo;
                 s.isHealing = false;
                 s.healTimer = 0;
+                // Force immediate health sync to other players
+                if (this.network && this.network.connected) {
+                  this.network.sendHealthUpdate(ps.health);
+                  // Also send a full state update right away
+                  this.network._lastStateSend = 0;
+                }
                 if (SOUND) SOUND.medpackDone();
               }
             }
@@ -3644,7 +3762,10 @@
         const dest = mesh._destructible;
         if (dest.crumbled) return;
         dest.crumbled = true;
-        if (SOUND) SOUND.crumble();
+        if (SOUND) {
+          SOUND.crumble();
+          SOUND.collapseAt({ x: dest.x, y: dest.y, z: dest.z });
+        }
 
         // Remove the original mesh from the scene + bullet target list + colliders
         this.scene.remove(mesh);
@@ -3704,7 +3825,10 @@
         const dest = mesh._destructible;
         if (dest.crumbled) return;
         dest.crumbled = true;
-        if (SOUND) SOUND.collapse();
+        if (SOUND) {
+          SOUND.collapse();
+          SOUND.collapseAt({ x: dest.x, y: dest.y, z: dest.z });
+        }
 
         // Strip the original mesh from the world (colliders, bullet targets)
         this.scene.remove(mesh);
@@ -3915,6 +4039,15 @@
         this._flashes = [];
 
         this._aabb = new THREE.Vector3();
+        this.remoteGrenades = []; // visual-only grenades from other players
+
+        // Listen for remote grenade events
+        if (network && !network.offlineMode) {
+          network.on('remoteGrenade', d => {
+            if (d.senderId === network.localId) return;
+            this._spawnRemoteGrenade(d);
+          });
+        }
       }
 
       reset() {
@@ -3952,6 +4085,30 @@
             (fy / len) * GRENADE_THROW_SPEED * 0.7 + ps.velocity.y * 0.4,
             (fz / len) * GRENADE_THROW_SPEED + ps.velocity.z * 0.4
           ),
+          t: 0
+        });
+
+        // Broadcast to other players
+        if (this.network && this.network.connected) {
+          this.network.sendGrenade({
+            senderId: this.network.localId,
+            px: mesh.position.x,
+            py: mesh.position.y,
+            pz: mesh.position.z,
+            vx: (fx / len) * GRENADE_THROW_SPEED + ps.velocity.x * 0.4,
+            vy: (fy / len) * GRENADE_THROW_SPEED * 0.7 + ps.velocity.y * 0.4,
+            vz: (fz / len) * GRENADE_THROW_SPEED + ps.velocity.z * 0.4
+          });
+        }
+      }
+
+      _spawnRemoteGrenade(d) {
+        const mesh = new THREE.Mesh(this._geo, this._mat);
+        mesh.position.set(d.px, d.py, d.pz);
+        this.scene.add(mesh);
+        this.remoteGrenades.push({
+          mesh,
+          vel: new THREE.Vector3(d.vx, d.vy, d.vz),
           t: 0
         });
       }
@@ -4004,7 +4161,10 @@
 
       explode(g) {
         const pos = g.mesh.position.clone();
-        if (SOUND) SOUND.explosion();
+        if (SOUND) {
+          SOUND.explosion();
+          SOUND.explosionAt(pos);
+        }
 
         // Visual flash
         const flash = new THREE.Mesh(this._flashGeo, this._flashMat.clone());
@@ -4088,6 +4248,30 @@
             this.scene.remove(f.mesh);
             f.mesh.material.dispose();
             this._flashes.splice(i, 1);
+          }
+        }
+
+        // Step remote grenades (visual only — no damage)
+        for (let i = this.remoteGrenades.length - 1; i >= 0; i--) {
+          const g = this.remoteGrenades[i];
+          g.t += dt;
+          g.vel.y += GRENADE_GRAVITY * dt;
+          this._collide(g, dt);
+          g.mesh.rotation.x += dt * 6;
+          g.mesh.rotation.y += dt * 4;
+
+          if (g.t >= GRENADE_FUSE) {
+            // Visual explosion only (damage was handled by the thrower's client)
+            const pos = g.mesh.position.clone();
+            const flash = new THREE.Mesh(this._flashGeo, this._flashMat.clone());
+            flash.position.copy(pos);
+            flash.scale.setScalar(0.6);
+            this.scene.add(flash);
+            this._flashes.push({ mesh: flash, t: 0, life: 0.45 });
+            if (SOUND) SOUND.explosionAt(pos);
+            if (this.destruction) this.destruction.applyBlast(pos, GRENADE_RADIUS, 1);
+            this.scene.remove(g.mesh);
+            this.remoteGrenades.splice(i, 1);
           }
         }
       }
@@ -4644,6 +4828,7 @@
       const canvas = document.getElementById('game-canvas');
       const lockScreen = document.getElementById('lock-screen');
       const nameInput = document.getElementById('player-name-input');
+      const passwordInput = document.getElementById('server-password-input');
       const btnConnect = document.getElementById('btn-connect');
       const btnOffline = document.getElementById('btn-offline');
       const connStatus = document.getElementById('connection-status');
@@ -4677,6 +4862,25 @@
       engine.weapons = weapons;
 
       engine.scene.add(engine.camera);
+
+      // Set up 3D positional audio listener on the camera
+      const audioListener = new THREE.AudioListener();
+      engine.camera.add(audioListener);
+      SOUND._listener = audioListener;
+      SOUND._scene = engine.scene;
+
+      // Listen for remote gunshots and play positional audio
+      network.on('remoteShoot', d => {
+        if (d.senderId === network.localId) return;
+        if (SOUND) SOUND.gunshotAt({ x: d.ox, y: d.oy, z: d.oz }, d.weaponId);
+      });
+
+      // Listen for remote health updates
+      network.on('healthUpdate', d => {
+        if (!d.senderId || d.senderId === network.localId) return;
+        const remote = network.remotePlayers.get(d.senderId);
+        if (remote) remote.health = d.health;
+      });
 
       const inputSystem = {
         update() { input.update(); },
@@ -4747,7 +4951,7 @@
         connStatus.style.display = 'flex';
         connMsg.textContent = 'Connecting to server…';
         connError.style.display = 'none';
-        network.connect(name);
+        network.connect(name, passwordInput.value);
       });
 
       btnOffline.addEventListener('click', () => {
@@ -4834,7 +5038,62 @@
         hud.addKillFeedEntry(killer, victim, weapon);
       });
 
-      console.log('[KRNK.js] Ready — 7 weapons, bigger map, ladders, optimized');
+      // Password rejection — go back to lock screen with error
+      network.on('wrongPassword', () => {
+        network.disconnect();
+        connMsg.textContent = 'Wrong password.';
+        connError.textContent = 'The server password is incorrect. Please try again.';
+        connError.style.display = 'block';
+        setTimeout(() => {
+          connStatus.style.display = 'none';
+          lockScreen.style.display = 'flex';
+          passwordInput.value = '';
+          passwordInput.focus();
+        }, 1800);
+      });
+
+      network.on('passwordRequired', () => {
+        network.disconnect();
+        connMsg.textContent = 'Password required.';
+        connError.textContent = 'This server requires a password to join.';
+        connError.style.display = 'block';
+        setTimeout(() => {
+          connStatus.style.display = 'none';
+          lockScreen.style.display = 'flex';
+          passwordInput.focus();
+        }, 1800);
+      });
+
+      // Map reset when server empties — rebuild entire map
+      network.on('mapReset', () => {
+        console.log('[KRNK] Server map reset — rebuilding');
+        // Remove all existing map meshes from scene
+        for (const m of map.meshes) {
+          map.scene.remove(m);
+          if (m.geometry && !map._sharedBoxGeoCache) m.geometry.dispose();
+        }
+        map.colliders.length = 0;
+        map.ladders.length = 0;
+        map.meshes.length = 0;
+        map.materials.forEach(m => m.dispose());
+        map.materials.length = 0;
+        map._sharedBoxGeoCache.clear();
+        // Clear destruction state
+        destruction.debris.length = 0;
+        destruction.collapsing.length = 0;
+        // Rebuild
+        map.build();
+        // Respawn player
+        player.spawn();
+      });
+
+      // Also handle local map reset when last remote player leaves (offline-like)
+      network.on('playerLeft', () => {
+        // If we're the only one left on the server, the server will send mapReset
+        // This is handled server-side; nothing extra needed client-side
+      });
+
+      console.log('[KRNK.js] Ready — 8 weapons, bigger map, ladders, password, map reset');
     })();
   </script>
 </body>
