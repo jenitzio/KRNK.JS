@@ -1,4 +1,6 @@
 
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -406,12 +408,26 @@
       text-align: center;
       outline: none;
     }
-    #btn-connect, #btn-offline, #setting-reset {
+    #btn-connect, #btn-offline, #btn-login, #setting-reset {
       border: none;
       cursor: pointer;
       border-radius: 8px;
       font-weight: 800;
       pointer-events: auto;
+    }
+    #btn-login {
+      margin-top: 10px;
+      padding: 12px 48px;
+      background: linear-gradient(135deg, #4a7fff, #6d5bff);
+      color: #fff;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      font-size: 14px;
+    }
+    #btn-login.admin {
+      background: linear-gradient(135deg, #ffb347, #ffcc33);
+      color: #2a1d00;
+      box-shadow: 0 0 20px rgba(255,200,60,.4);
     }
     #btn-connect {
       margin-top: 6px;
@@ -568,9 +584,17 @@
     <h1>Learning-Guide</h1>
     <div class="subtitle">Help for GCSE Exams</div>
     <input id="player-name-input" type="text" maxlength="16" placeholder="Enter your name" autocomplete="off" spellcheck="false" />
-    <input id="server-password-input" type="password" maxlength="32" placeholder="Server password" autocomplete="off" spellcheck="false" style="width:220px;padding:11px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;text-align:center;outline:none;margin-top:4px;" />
-    <button id="btn-connect">Connect</button>
+    <input id="server-password-input" type="hidden" value="" />
+    <button id="btn-connect">Connect to Server</button>
     <button id="btn-offline">Offline Mode</button>
+    <div id="role-tabs" style="display:flex;gap:8px;margin-top:14px;align-items:center;">
+      <button type="button" id="btn-admin-toggle" class="role-tab" style="padding:8px 18px;border-radius:8px;border:1px solid rgba(255,200,60,.35);background:rgba(255,200,60,.10);color:#ffd34d;cursor:pointer;font-weight:700;letter-spacing:1px;">ADMIN LOGIN</button>
+    </div>
+    <div id="admin-login-row" style="display:none;flex-direction:column;align-items:center;gap:6px;margin-top:4px;">
+      <input id="role-password-input" type="password" maxlength="32" placeholder="Admin password" autocomplete="off" spellcheck="false" style="width:220px;padding:11px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#fff;text-align:center;outline:none;" />
+      <div id="role-error" style="color:#ff7d7d;font-size:12px;min-height:14px;"></div>
+      <button id="btn-login" class="admin">Enter Admin Panel</button>
+    </div>
     <div class="controls-hint">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move ·
       <kbd>Space</kbd> Jump / Wall-Jump / Climb ·
@@ -659,8 +683,8 @@
     const LADDER_DESCEND_SPEED = 5.5;
     // Lean / peek tuning. Higher offset = you can actually peek your head
     // around a corner instead of just tilting in place.
-    const LEAN_MAX_OFFSET = 0.85;     // world units of camera shift at full lean
-    const LEAN_MAX_ROLL   = 0.28;     // radians of camera roll at full lean
+    const LEAN_MAX_OFFSET = 1.55;    // world units of camera shift at full lean (real corner peek)
+    const LEAN_MAX_ROLL   = 0.12;    // radians of camera roll at full lean (subtle tilt only)
 
     // Hand-picked open-air spawn points, all verified to NOT overlap any
     // structure on the rebuilt (longer) map. These are validated again at
@@ -2377,6 +2401,7 @@
           health: 100,
           maxHealth: 100,
           isDead: false,
+          role: (window.__PLAYER_ROLE || 'member'),
           kills: 0,
           deaths: 0
         };
@@ -2401,6 +2426,11 @@
         this.eyeHeight = this.STAND_HEIGHT;
         this.respawnTimer = 0;
         this.deathKiller = 'Unknown';
+        // Admin role buff: 300 HP
+        if (this.state.role === 'admin') {
+          this.state.maxHealth = 300;
+          this.state.health = 300;
+        }
         this._bobTime = 0;
         this._bobAmt = 0;
 
@@ -2743,7 +2773,7 @@
         if (this.input.isKeyDown('KeyQ')) leanTarget -= 1;
         if (this.input.isKeyDown('KeyE')) leanTarget += 1;
         if (this.isSprinting || this.state.isOnLadder || this.isSliding) leanTarget = 0;
-        this.leanAmt += (leanTarget - this.leanAmt) * Math.min(1, 10 * dt);
+        this.leanAmt += (leanTarget - this.leanAmt) * Math.min(1, 16 * dt);
 
         // Smoothed slide tilt (forward dip + slight roll)
         const slideT = this.isSliding ? 1 : 0;
@@ -3476,6 +3506,17 @@
         adsOffset: { x: 0.0, y: -0.14, z: -0.28 },
         color: 0x2e2e34, scale: 0.75
       },
+      gold_gun: {
+        name: 'Golden Hand Cannon',
+        damage: 9999, headshotMult: 1, fireRate: 4, automatic: false,
+        magSize: 12, reloadTime: 1.2, range: 800,
+        spread: 0.0005, adsSpread: 0.0001, pellets: 1,
+        recoil: [[0, -0.04]], recovery: 8,
+        hipOffset: { x: 0.24, y: -0.22, z: -0.44 },
+        adsOffset: { x: 0.0, y: -0.16, z: -0.32 },
+        color: 0xffd34d, scale: 1.05,
+        isGold: true
+      },
       medpack: {
         name: 'Med Pack',
         damage: 0, headshotMult: 1, fireRate: 0.2, automatic: false,
@@ -3501,12 +3542,15 @@
         this.network = network;
         this.bots = bots;
 
-        this.weaponIds = ['assault_rifle', 'smg', 'sniper', 'shotgun', 'lmg', 'dmr', 'pistol', 'medpack'];
+        const _isAdmin = (window.__PLAYER_ROLE === 'admin');
+        this.weaponIds = _isAdmin
+          ? ['gold_gun', 'assault_rifle', 'smg', 'sniper', 'shotgun', 'lmg', 'dmr', 'pistol', 'medpack']
+          : ['assault_rifle', 'smg', 'sniper', 'shotgun', 'lmg', 'dmr', 'pistol', 'medpack'];
         this.weaponIndex = 0;
         this.remotePlayerMeshes = [];
 
         this.state = {
-          currentWeaponId: 'assault_rifle',
+          currentWeaponId: (window.__PLAYER_ROLE === 'admin') ? 'gold_gun' : 'assault_rifle',
           ammo: 30,
           reserveAmmo: 120,
           isReloading: false,
@@ -5677,6 +5721,59 @@
         network.connect(name, passwordInput.value);
       });
 
+      // ---- Admin login (optional). Anyone can join without a password as a regular player. ----
+      const ADMIN_PASSWORD = '1234567';
+      const btnAdminToggle = document.getElementById('btn-admin-toggle');
+      const adminRow = document.getElementById('admin-login-row');
+      const rolePwInput = document.getElementById('role-password-input');
+      const roleError = document.getElementById('role-error');
+      const btnLogin = document.getElementById('btn-login');
+
+      // Default role: regular member (no perks, no password needed)
+      window.__PLAYER_ROLE = 'member';
+
+      btnAdminToggle.addEventListener('click', () => {
+        const showing = adminRow.style.display === 'flex';
+        adminRow.style.display = showing ? 'none' : 'flex';
+        if (!showing) setTimeout(() => rolePwInput.focus(), 30);
+      });
+
+      function applyAdminBuffs() {
+        player.state.role = 'admin';
+        player.state.maxHealth = 300;
+        player.state.health = 300;
+        weapons.weaponIds = ['gold_gun', 'assault_rifle', 'smg', 'sniper', 'shotgun', 'lmg', 'dmr', 'pistol', 'medpack'];
+        weapons.weaponIndex = 0;
+        weapons.state.currentWeaponId = 'gold_gun';
+        if (weapons.applyWeapon) weapons.applyWeapon();
+        if (weapons.buildGun) weapons.buildGun();
+      }
+
+      function attemptAdminLogin() {
+        const pw = rolePwInput.value;
+        if (pw !== ADMIN_PASSWORD) {
+          roleError.textContent = 'Incorrect admin password.';
+          rolePwInput.value = '';
+          rolePwInput.focus();
+          return;
+        }
+        roleError.textContent = '';
+        window.__PLAYER_ROLE = 'admin';
+        if (SOUND) { SOUND.ensure(); SOUND.resume(); }
+        const name = (nameInput.value.trim() || 'Admin');
+        try { localStorage.setItem('krnk_player_name', name); } catch {}
+        applyAdminBuffs();
+        // Admin enters offline mode by default (private admin panel)
+        network.goOffline(name);
+        startGame();
+      }
+
+      btnLogin.addEventListener('click', attemptAdminLogin);
+      rolePwInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); attemptAdminLogin(); }
+      });
+
+
       btnOffline.addEventListener('click', () => {
         if (SOUND) { SOUND.ensure(); SOUND.resume(); }
         const name = nameInput.value.trim() || 'Player';
@@ -5821,5 +5918,4 @@
   </script>
 </body>
 </html>
-
 
