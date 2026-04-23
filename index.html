@@ -654,6 +654,80 @@ html, body {
   cursor: pointer;
 }
 .upgrade-buy:disabled { opacity: 0.45; cursor: default; }
+.upgrade-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.upgrade-tab {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  color: #8b95ad;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.upgrade-tab.active {
+  color: #ffd54f;
+  background: rgba(255,213,79,.12);
+  border-color: rgba(255,213,79,.3);
+}
+.weapon-card {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 200px;
+}
+.weapon-card.owned { border-color: rgba(100,200,100,.25); }
+.weapon-card.equipped { border-color: rgba(255,213,79,.4); box-shadow: 0 0 12px rgba(255,213,79,.10); }
+.weapon-card h3 { font-size: 15px; letter-spacing: 1px; text-transform: uppercase; }
+.weapon-card .tier-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  margin-left: 6px;
+}
+.weapon-card .tier-1 { background: rgba(100,180,255,.15); color: #7db6ff; }
+.weapon-card .tier-2 { background: rgba(180,100,255,.15); color: #c68aff; }
+.weapon-card .tier-3 { background: rgba(255,170,60,.15); color: #ffb848; }
+.weapon-card .stat-row { display: flex; justify-content: space-between; font-size: 11px; color: #9ca7c2; }
+.weapon-card .stat-row .val { color: #fff; font-weight: 700; }
+.weapon-card-actions { display: flex; gap: 6px; margin-top: auto; }
+.weapon-card-actions button {
+  flex: 1;
+  border: 1px solid rgba(255,211,77,.3);
+  background: rgba(255,211,77,.12);
+  color: #ffe08a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.weapon-card-actions button:disabled { opacity: 0.4; cursor: default; }
+.weapon-card-actions button.equip-btn {
+  border-color: rgba(100,200,100,.3);
+  background: rgba(100,200,100,.12);
+  color: #8dff8d;
+}
+.weapon-card-actions button.equipped-btn {
+  border-color: rgba(255,213,79,.4);
+  background: rgba(255,213,79,.2);
+  color: #ffd54f;
+  cursor: default;
+}
 .upgrade-footer {
   display: flex;
   justify-content: space-between;
@@ -1196,7 +1270,11 @@ class SoundManager {
       case 'pistol':   lp = 5000; dur = 0.14; peak = 0.55; click = 0.07; sub = 105; tail = 0.10; break;
       case 'smg':      lp = 5000; dur = 0.11; peak = 0.50; click = 0.05; sub = 100; tail = 0.08; break;
       case 'gold_gun': lp = 6500; dur = 0.22; peak = 0.75; click = 0.11; sub = 95; tail = 0.18; break;
-      default:         lp = 5000; dur = 0.16; peak = 0.55; click = 0.06; sub = 95; tail = 0.12; break;
+      case 'smg_t2': case 'smg_t3':       lp = 5200; dur = 0.10; peak = 0.52; click = 0.06; sub = 98; tail = 0.09; break;
+      case 'lmg_t2': case 'lmg_t3':       lp = 5600; dur = 0.21; peak = 0.72; click = 0.11; sub = 73; tail = 0.17; break;
+      case 'sniper_t2': case 'sniper_t3': lp = 7200; dur = 0.60; peak = 0.98; click = 0.20; sub = 55; tail = 0.38; break;
+      case 'shotgun_t2': case 'shotgun_t3': lp = 3600; dur = 0.40; peak = 0.90; click = 0.15; sub = 52; tail = 0.30; break;
+      default:           lp = 5000; dur = 0.16; peak = 0.55; click = 0.06; sub = 95; tail = 0.12; break;
     }
     this._noise(dur, peak, 250, lp);
     this._osc('square',  sub,        0.003, 0.08, click,       sub * 0.4);
@@ -3276,6 +3354,63 @@ const WEAPONS = {
     recoil: [[0,0]], recovery: 1,
     hipOffset: { x: 0.2, y: -0.2, z: -0.28 }, adsOffset: { x: 0.06, y: -0.16, z: -0.22 },
     color: 0xffc766, scale: 0.92, isDeployable: true, isOrbital: true, unlockKills: 20
+  },
+  // === TIER 2 WEAPONS ===
+  smg_t2: {
+    name: 'Vector', damage: 22, headshotMult: 1.9, fireRate: 18, automatic: true,
+    magSize: 33, reloadTime: 1.4, range: 170, spread: 0.018, adsSpread: 0.006, pellets: 1,
+    recoil: [[0.002,-0.020],[-0.003,-0.022],[0.003,-0.018],[-0.002,-0.024]],
+    recovery: 7, hipOffset: { x: 0.22, y: -0.20, z: -0.44 }, adsOffset: { x: 0, y: -0.14, z: -0.30 },
+    color: 0x5a5d64, scale: 0.88, tier: 2, category: 'smg'
+  },
+  smg_t3: {
+    name: 'P90 Vortex', damage: 26, headshotMult: 2.0, fireRate: 20, automatic: true,
+    magSize: 50, reloadTime: 1.8, range: 185, spread: 0.016, adsSpread: 0.005, pellets: 1,
+    recoil: [[0.001,-0.018],[-0.002,-0.020],[0.002,-0.016],[-0.001,-0.019]],
+    recovery: 8, hipOffset: { x: 0.22, y: -0.20, z: -0.44 }, adsOffset: { x: 0, y: -0.14, z: -0.30 },
+    color: 0x4a4e58, scale: 0.92, tier: 3, category: 'smg'
+  },
+  lmg_t2: {
+    name: 'PKM', damage: 28, headshotMult: 1.9, fireRate: 12, automatic: true,
+    magSize: 120, reloadTime: 4.0, range: 260, spread: 0.025, adsSpread: 0.010, pellets: 1,
+    recoil: [[0.004,-0.038],[-0.004,-0.042],[0.005,-0.036],[-0.005,-0.044],[0.004,-0.040],[-0.003,-0.038]],
+    recovery: 3.2, hipOffset: { x: 0.30, y: -0.24, z: -0.55 }, adsOffset: { x: 0, y: -0.17, z: -0.40 },
+    color: 0x3a4a3a, scale: 1.18, tier: 2, category: 'lmg'
+  },
+  lmg_t3: {
+    name: 'MG42 Buzzsaw', damage: 32, headshotMult: 2.0, fireRate: 14, automatic: true,
+    magSize: 150, reloadTime: 4.8, range: 280, spread: 0.022, adsSpread: 0.008, pellets: 1,
+    recoil: [[0.003,-0.035],[-0.003,-0.038],[0.004,-0.034],[-0.004,-0.040],[0.003,-0.036],[-0.003,-0.035]],
+    recovery: 3.5, hipOffset: { x: 0.30, y: -0.24, z: -0.55 }, adsOffset: { x: 0, y: -0.17, z: -0.40 },
+    color: 0x2a352a, scale: 1.22, tier: 3, category: 'lmg'
+  },
+  sniper_t2: {
+    name: 'Barrett M82', damage: 130, headshotMult: 1, fireRate: 0.7, automatic: false,
+    magSize: 8, reloadTime: 3.5, range: 700, spread: 0.0008, adsSpread: 0.0001, pellets: 1,
+    recoil: [[0,-0.22]], recovery: 1.2,
+    hipOffset: { x: 0.32, y: -0.25, z: -0.60 }, adsOffset: { x: 0, y: -0.16, z: -0.4 },
+    color: 0x2e422e, scale: 1.25, tier: 2, category: 'sniper'
+  },
+  sniper_t3: {
+    name: 'Cheytac M200', damage: 160, headshotMult: 1, fireRate: 0.55, automatic: false,
+    magSize: 7, reloadTime: 3.8, range: 850, spread: 0.0005, adsSpread: 0.00008, pellets: 1,
+    recoil: [[0,-0.26]], recovery: 1.0,
+    hipOffset: { x: 0.32, y: -0.25, z: -0.60 }, adsOffset: { x: 0, y: -0.16, z: -0.4 },
+    color: 0x1e321e, scale: 1.30, tier: 3, category: 'sniper'
+  },
+  shotgun_t2: {
+    name: 'AA-12', damage: 16, headshotMult: 1.6, fireRate: 3.2, automatic: true,
+    magSize: 20, reloadTime: 3.0, range: 55, spread: 0.055, adsSpread: 0.032, pellets: 8,
+    recoil: [[0.006,-0.10],[-0.006,-0.11],[0.005,-0.10]], recovery: 3.2,
+    hipOffset: { x: 0.28, y: -0.23, z: -0.52 }, adsOffset: { x: 0, y: -0.18, z: -0.38 },
+    color: 0x3a2820, scale: 1.08, tier: 2, category: 'shotgun'
+  },
+  shotgun_t3: {
+    name: 'KSG Devastator', damage: 20, headshotMult: 1.8, fireRate: 2.5, automatic: false,
+    magSize: 14, reloadTime: 3.2, range: 65, spread: 0.048, adsSpread: 0.028, pellets: 10,
+    recoil: [[0.008,-0.14],[-0.008,-0.145],[0.007,-0.13]], recovery: 2.8,
+    hipOffset: { x: 0.28, y: -0.23, z: -0.52 }, adsOffset: { x: 0, y: -0.18, z: -0.38 },
+    color: 0x302018, scale: 1.12, tier: 3, category: 'shotgun'
   }
 };
 const BASE_WEAPONS = JSON.parse(JSON.stringify(WEAPONS));
@@ -4931,7 +5066,7 @@ class SkinManager {
 // LOADOUT MANAGER — Fixed slot-based loadout system
 // ============================================================
 const LOADOUT_SLOTS = {
-  PRIMARY:   { label: 'PRIMARY',   key: '1', weapons: ['assault_rifle', 'smg', 'sniper', 'shotgun', 'lmg', 'dmr'] },
+  PRIMARY:   { label: 'PRIMARY',   key: '1', weapons: ['assault_rifle', 'smg', 'sniper', 'shotgun', 'lmg', 'dmr', 'smg_t2', 'smg_t3', 'lmg_t2', 'lmg_t3', 'sniper_t2', 'sniper_t3', 'shotgun_t2', 'shotgun_t3'] },
   SECONDARY: { label: 'SECONDARY', key: '2', weapons: ['pistol'] },
   MELEE:     { label: 'MELEE',     key: '3', weapons: ['melee'] },
   EQUIPMENT: { label: 'EQUIP',     key: '4', weapons: ['medpack', 'turret', 'orbital'] },
@@ -5000,10 +5135,19 @@ class ADSScopeManager {
       dmr:           { type: 'reflex',  fovMult: 0.55, sensitivity: 0.55 },
       assault_rifle: { type: 'reflex',  fovMult: 0.70, sensitivity: 0.65 },
       lmg:           { type: 'reflex',  fovMult: 0.72, sensitivity: 0.65 },
-      smg:           { type: null,      fovMult: 0.80, sensitivity: 0.75 },
-      shotgun:       { type: null,      fovMult: 0.82, sensitivity: 0.80 },
-      pistol:        { type: null,      fovMult: 0.80, sensitivity: 0.75 },
+      smg:           { type: 'reflex',  fovMult: 0.80, sensitivity: 0.75 },
+      shotgun:       { type: 'reflex',  fovMult: 0.82, sensitivity: 0.80 },
+      pistol:        { type: 'reflex',  fovMult: 0.80, sensitivity: 0.75 },
       gold_gun:      { type: 'reflex',  fovMult: 0.60, sensitivity: 0.55 },
+      // Tier 2 & 3 weapons
+      smg_t2:        { type: 'reflex',  fovMult: 0.78, sensitivity: 0.72 },
+      smg_t3:        { type: 'reflex',  fovMult: 0.75, sensitivity: 0.70 },
+      lmg_t2:        { type: 'reflex',  fovMult: 0.70, sensitivity: 0.62 },
+      lmg_t3:        { type: 'reflex',  fovMult: 0.68, sensitivity: 0.60 },
+      sniper_t2:     { type: 'sniper',  fovMult: 0.20, sensitivity: 0.25 },
+      sniper_t3:     { type: 'sniper',  fovMult: 0.15, sensitivity: 0.20 },
+      shotgun_t2:    { type: 'reflex',  fovMult: 0.80, sensitivity: 0.78 },
+      shotgun_t3:    { type: 'reflex',  fovMult: 0.78, sensitivity: 0.75 },
     };
     this._baseFov = settings.get('fov');
     this._targetFov = this._baseFov;
@@ -5155,6 +5299,7 @@ window.LoadoutAPI = null;
     constructor(input, weapons, economy) {
       this.input = input; this.weapons = weapons; this.economy = economy;
       this.isOpen = false;
+      this.activeTab = 'upgrades'; // 'upgrades' | 'shop'
       this.el = {
         root: document.getElementById('upgrade-menu'),
         cash: document.getElementById('upgrade-cash'),
@@ -5163,9 +5308,114 @@ window.LoadoutAPI = null;
         continueBtn: document.getElementById('upgrade-continue')
       };
       this.el.continueBtn.addEventListener('click', () => this.close());
+      // Weapon shop state: which weapons are owned/equipped
+      this.ownedWeapons = new Set(['assault_rifle','smg','sniper','shotgun','lmg','dmr','pistol','melee','medpack']);
+      this._loadShop();
+      // Weapon shop catalog
+      this.shopWeapons = [
+        { id: 'smg_t2',     cost: 800,  category: 'SMG',     tier: 2 },
+        { id: 'smg_t3',     cost: 2000, category: 'SMG',     tier: 3 },
+        { id: 'lmg_t2',     cost: 900,  category: 'LMG',     tier: 2 },
+        { id: 'lmg_t3',     cost: 2200, category: 'LMG',     tier: 3 },
+        { id: 'sniper_t2',  cost: 1200, category: 'Sniper',  tier: 2 },
+        { id: 'sniper_t3',  cost: 2800, category: 'Sniper',  tier: 3 },
+        { id: 'shotgun_t2', cost: 1000, category: 'Shotgun', tier: 2 },
+        { id: 'shotgun_t3', cost: 2500, category: 'Shotgun', tier: 3 },
+      ];
+      // Weapon upgrade defs: per-weapon stat upgrades (only available once owned)
+      this.weaponUpgradeDefs = {};
+      for (const sw of this.shopWeapons) {
+        const w = WEAPONS[sw.id];
+        if (!w) continue;
+        this.weaponUpgradeDefs[sw.id] = [
+          { key: sw.id + '_damage', stat: 'damage', label: 'Damage', baseCost: Math.round(sw.cost * 0.4), stepCost: Math.round(sw.cost * 0.25), maxLevel: 5 },
+          { key: sw.id + '_rpm', stat: 'fireRate', label: 'Fire Rate', baseCost: Math.round(sw.cost * 0.35), stepCost: Math.round(sw.cost * 0.2), maxLevel: 4 },
+          { key: sw.id + '_mag', stat: 'magSize', label: 'Magazine', baseCost: Math.round(sw.cost * 0.3), stepCost: Math.round(sw.cost * 0.18), maxLevel: 4 },
+        ];
+      }
+      this.render();
+    }
+    _loadShop() {
+      try {
+        const d = JSON.parse(localStorage.getItem('krnk_owned_weapons') || '[]');
+        if (Array.isArray(d)) d.forEach(id => this.ownedWeapons.add(id));
+      } catch {}
+    }
+    _saveShop() {
+      try { localStorage.setItem('krnk_owned_weapons', JSON.stringify([...this.ownedWeapons])); } catch {}
+    }
+    _buyWeapon(shopDef) {
+      if (this.ownedWeapons.has(shopDef.id)) return;
+      if (this.economy.cash < shopDef.cost) return;
+      this.economy.cash -= shopDef.cost;
+      this.economy.save();
+      this.ownedWeapons.add(shopDef.id);
+      this._saveShop();
+      this.render();
+    }
+    _equipWeapon(weaponId) {
+      if (!this.ownedWeapons.has(weaponId)) return;
+      if (window.LoadoutAPI) {
+        window.LoadoutAPI.setPrimary(weaponId);
+        // Update active weapon list
+        const isAdmin = window.__PLAYER_ROLE === 'admin';
+        this.weapons.weaponIds = window.LoadoutAPI.getActiveWeaponIds(isAdmin);
+        // Switch to it
+        const idx = this.weapons.weaponIds.indexOf(weaponId);
+        if (idx >= 0) {
+          this.weapons.saveCurrentAmmo();
+          this.weapons.weaponIndex = idx;
+          this.weapons.state.currentWeaponId = weaponId;
+          this.weapons.applyWeapon();
+          this.weapons.buildGun();
+          if (window.SkinAPI) window.SkinAPI.applyToViewModel(this.weapons.viewModel, weaponId);
+        }
+      }
+      this.render();
+    }
+    _upgradeWeaponStat(weaponId, upgDef) {
+      const level = this.economy.getLevel(upgDef.key);
+      if (level >= upgDef.maxLevel) return;
+      const cost = upgDef.baseCost + level * upgDef.stepCost;
+      if (this.economy.cash < cost) return;
+      this.economy.cash -= cost;
+      this.economy.levels[upgDef.key] = level + 1;
+      this.economy.save();
+      // Apply upgrade
+      const w = WEAPONS[weaponId];
+      const base = BASE_WEAPONS[weaponId];
+      if (w && base) {
+        const newLevel = level + 1;
+        if (upgDef.stat === 'damage') w.damage = Math.round(base.damage * (1 + newLevel * 0.08));
+        else if (upgDef.stat === 'fireRate') w.fireRate = +(base.fireRate * (1 + newLevel * 0.06)).toFixed(2);
+        else if (upgDef.stat === 'magSize') w.magSize = base.magSize + Math.max(newLevel, Math.round(base.magSize * 0.12 * newLevel));
+      }
+      this.weapons.applyWeapon();
+      this.weapons.buildGun();
       this.render();
     }
     render() {
+      if (this.activeTab === 'shop') { this._renderShop(); return; }
+      this._renderUpgrades();
+    }
+    _renderTabs() {
+      let tabs = this.el.grid.parentElement.querySelector('.upgrade-tabs');
+      if (!tabs) {
+        tabs = document.createElement('div');
+        tabs.className = 'upgrade-tabs';
+        this.el.grid.parentElement.insertBefore(tabs, this.el.grid);
+      }
+      tabs.innerHTML = '';
+      for (const t of [{id:'upgrades',label:'UPGRADES'},{id:'shop',label:'WEAPON SHOP'}]) {
+        const btn = document.createElement('button');
+        btn.className = 'upgrade-tab' + (this.activeTab === t.id ? ' active' : '');
+        btn.textContent = t.label;
+        btn.addEventListener('click', () => { this.activeTab = t.id; this.render(); });
+        tabs.appendChild(btn);
+      }
+    }
+    _renderUpgrades() {
+      this._renderTabs();
       this.el.grid.innerHTML = '';
       for (const def of UPGRADE_DEFS) {
         const level = this.economy.getLevel(def.key);
@@ -5189,6 +5439,82 @@ window.LoadoutAPI = null;
       }
       this.el.cash.innerHTML = `<small>Cash Banked</small>$${Math.floor(this.economy.cash)}`;
       this.el.note.textContent = 'Earn $' + KILL_REWARD + ' per kill · upgrades save locally · press U in-match';
+    }
+    _renderShop() {
+      this._renderTabs();
+      this.el.grid.innerHTML = '';
+      const currentPrimary = window.LoadoutAPI ? window.LoadoutAPI.loadout.primary : 'assault_rifle';
+      for (const sw of this.shopWeapons) {
+        const w = WEAPONS[sw.id];
+        if (!w) continue;
+        const owned = this.ownedWeapons.has(sw.id);
+        const equipped = currentPrimary === sw.id;
+        const card = document.createElement('div');
+        card.className = 'weapon-card' + (equipped ? ' equipped' : (owned ? ' owned' : ''));
+        const tierClass = 'tier-' + sw.tier;
+        let statsHTML = `
+          <div class="stat-row"><span>Damage</span><span class="val">${w.damage}</span></div>
+          <div class="stat-row"><span>RPM</span><span class="val">${Math.round(w.fireRate * 60)}</span></div>
+          <div class="stat-row"><span>Magazine</span><span class="val">${w.magSize}</span></div>
+          <div class="stat-row"><span>Range</span><span class="val">${w.range}m</span></div>`;
+        card.innerHTML = `
+          <h3>${w.name} <span class="tier-badge ${tierClass}">T${sw.tier}</span></h3>
+          <div style="color:#8b95ad;font-size:11px;text-transform:uppercase;letter-spacing:1px">${sw.category}</div>
+          ${statsHTML}`;
+        const actions = document.createElement('div');
+        actions.className = 'weapon-card-actions';
+        if (!owned) {
+          const buyBtn = document.createElement('button');
+          buyBtn.textContent = '$' + sw.cost + ' BUY';
+          buyBtn.disabled = this.economy.cash < sw.cost;
+          buyBtn.addEventListener('click', () => this._buyWeapon(sw));
+          actions.appendChild(buyBtn);
+        } else {
+          if (equipped) {
+            const eqBtn = document.createElement('button');
+            eqBtn.className = 'equipped-btn';
+            eqBtn.textContent = '✓ EQUIPPED';
+            eqBtn.disabled = true;
+            actions.appendChild(eqBtn);
+          } else {
+            const eqBtn = document.createElement('button');
+            eqBtn.className = 'equip-btn';
+            eqBtn.textContent = 'EQUIP';
+            eqBtn.addEventListener('click', () => this._equipWeapon(sw.id));
+            actions.appendChild(eqBtn);
+          }
+          // Upgrade buttons for owned weapons
+          const upgDefs = this.weaponUpgradeDefs[sw.id];
+          if (upgDefs) {
+            const upgRow = document.createElement('div');
+            upgRow.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-top:6px;width:100%';
+            for (const ud of upgDefs) {
+              const lvl = this.economy.getLevel(ud.key);
+              const cost = ud.baseCost + lvl * ud.stepCost;
+              const maxed = lvl >= ud.maxLevel;
+              const row = document.createElement('div');
+              row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:11px;color:#cbd5ea';
+              row.innerHTML = `<span>${ud.label} <span style="color:#7faaff;font-weight:800">${lvl}/${ud.maxLevel}</span></span>`;
+              const ubtn = document.createElement('button');
+              ubtn.style.cssText = 'padding:4px 8px;border-radius:6px;border:1px solid rgba(255,211,77,.3);background:rgba(255,211,77,.12);color:#ffe08a;font-size:10px;font-weight:800;cursor:pointer';
+              ubtn.textContent = maxed ? 'MAX' : '$' + cost;
+              ubtn.disabled = maxed || this.economy.cash < cost;
+              if (ubtn.disabled) ubtn.style.opacity = '0.4';
+              ubtn.addEventListener('click', () => this._upgradeWeaponStat(sw.id, ud));
+              row.appendChild(ubtn);
+              upgRow.appendChild(row);
+            }
+            card.appendChild(actions);
+            card.appendChild(upgRow);
+            this.el.grid.appendChild(card);
+            continue;
+          }
+        }
+        card.appendChild(actions);
+        this.el.grid.appendChild(card);
+      }
+      this.el.cash.innerHTML = `<small>Cash Banked</small>$${Math.floor(this.economy.cash)}`;
+      this.el.note.textContent = 'Buy weapons, equip them, then upgrade stats · press U in-match';
     }
     open(firstTime = false) {
       this.render();
