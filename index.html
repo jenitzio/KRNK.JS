@@ -3424,6 +3424,9 @@ const UPGRADE_DEFS = [
   { key: 'pistol_reload', weaponId: 'pistol', stat: 'reloadTime', label: 'Sidearm Speedloader', description: 'Faster M9 reloads during emergencies.', baseCost: 240, stepCost: 160, maxLevel: 4 },
   { key: 'mine_stock', system: 'mine', stat: 'stock', label: 'Mine Rack', description: 'Carry one extra mine per tier.', baseCost: 320, stepCost: 220, maxLevel: 4 }
 ];
+// Registry for shop-weapon stat upgrades (registered by the shop controller at boot).
+// Each entry: { key, weaponId, stat: 'damage'|'fireRate'|'magSize', maxLevel }
+const SHOP_WEAPON_UPGRADE_REGISTRY = [];
 function applyUpgradeLevels(levels, mineSystem = null) {
   for (const weaponId of Object.keys(BASE_WEAPONS)) Object.assign(WEAPONS[weaponId], JSON.parse(JSON.stringify(BASE_WEAPONS[weaponId])));
   for (const def of UPGRADE_DEFS) {
@@ -3439,6 +3442,18 @@ function applyUpgradeLevels(levels, mineSystem = null) {
     if (def.stat === 'damage') weapon.damage = Math.round(base.damage * (1 + level * 0.08));
     else if (def.stat === 'magSize') weapon.magSize = base.magSize + Math.max(level, Math.round(base.magSize * 0.12 * level));
     else if (def.stat === 'reloadTime') weapon.reloadTime = Math.max(0.45, +(base.reloadTime * (1 - level * 0.09)).toFixed(2));
+  }
+  // Re-apply shop weapon upgrades (so that buying a base upgrade or reloading the page
+  // doesn't wipe per-weapon damage/RPM/mag upgrades on tier-2/3 weapons).
+  for (const entry of SHOP_WEAPON_UPGRADE_REGISTRY) {
+    const lvl = levels[entry.key] || 0;
+    if (!lvl) continue;
+    const w = WEAPONS[entry.weaponId];
+    const base = BASE_WEAPONS[entry.weaponId];
+    if (!w || !base) continue;
+    if (entry.stat === 'damage')        w.damage   = Math.round(base.damage * (1 + lvl * 0.08));
+    else if (entry.stat === 'fireRate') w.fireRate = +(base.fireRate * (1 + lvl * 0.06)).toFixed(2);
+    else if (entry.stat === 'magSize')  w.magSize  = base.magSize + Math.max(lvl, Math.round(base.magSize * 0.12 * lvl));
   }
   if (mineSystem) {
     const mineLevel = levels.mine_stock || 0;
@@ -5174,19 +5189,36 @@ class ADSScopeManager {
   }
   _showScope(type) {
     if (!this.overlayEl) return;
+    // Clear any inline display override from a previous hide so the CSS class can take over.
+    this.overlayEl.style.display = '';
     this.overlayEl.className = '';
+    this.overlayEl.innerHTML = '';
     if (type === 'sniper') {
       this.overlayEl.classList.add('sniper-scope');
+      // Inject mil-dot reticle ring(s)
+      const mil = document.createElement('div');
+      mil.className = 'sniper-mil';
+      this.overlayEl.appendChild(mil);
       if (this.crosshairEl) this.crosshairEl.style.display = 'none';
     } else if (type === 'reflex') {
       this.overlayEl.classList.add('reflex-scope');
+      // Inject reflex sight reticle (ring + dot)
+      const ring = document.createElement('div');
+      ring.className = 'reflex-ring';
+      const dot = document.createElement('div');
+      dot.className = 'reflex-dot';
+      this.overlayEl.appendChild(ring);
+      this.overlayEl.appendChild(dot);
       if (this.crosshairEl) this.crosshairEl.style.display = 'none';
     }
   }
   _hideScope() {
     if (this.overlayEl) {
       this.overlayEl.className = '';
-      this.overlayEl.style.display = 'none';
+      this.overlayEl.innerHTML = '';
+      // Do NOT set inline display:none — rely on the base CSS rule (#scope-overlay { display:none })
+      // so that re-adding .sniper-scope / .reflex-scope can show it again.
+      this.overlayEl.style.display = '';
     }
     if (this.crosshairEl) this.crosshairEl.style.display = 'block';
   }
@@ -5327,12 +5359,22 @@ window.LoadoutAPI = null;
       for (const sw of this.shopWeapons) {
         const w = WEAPONS[sw.id];
         if (!w) continue;
-        this.weaponUpgradeDefs[sw.id] = [
-          { key: sw.id + '_damage', stat: 'damage', label: 'Damage', baseCost: Math.round(sw.cost * 0.4), stepCost: Math.round(sw.cost * 0.25), maxLevel: 5 },
-          { key: sw.id + '_rpm', stat: 'fireRate', label: 'Fire Rate', baseCost: Math.round(sw.cost * 0.35), stepCost: Math.round(sw.cost * 0.2), maxLevel: 4 },
-          { key: sw.id + '_mag', stat: 'magSize', label: 'Magazine', baseCost: Math.round(sw.cost * 0.3), stepCost: Math.round(sw.cost * 0.18), maxLevel: 4 },
+        const defs = [
+          { key: sw.id + '_damage', stat: 'damage',   label: 'Damage',    baseCost: Math.round(sw.cost * 0.4),  stepCost: Math.round(sw.cost * 0.25), maxLevel: 5 },
+          { key: sw.id + '_rpm',    stat: 'fireRate', label: 'Fire Rate', baseCost: Math.round(sw.cost * 0.35), stepCost: Math.round(sw.cost * 0.20), maxLevel: 4 },
+          { key: sw.id + '_mag',    stat: 'magSize',  label: 'Magazine',  baseCost: Math.round(sw.cost * 0.3),  stepCost: Math.round(sw.cost * 0.18), maxLevel: 4 },
         ];
+        this.weaponUpgradeDefs[sw.id] = defs;
+        // Register so applyUpgradeLevels reapplies them after every recompute / page reload.
+        for (const d of defs) {
+          if (!SHOP_WEAPON_UPGRADE_REGISTRY.find(e => e.key === d.key)) {
+            SHOP_WEAPON_UPGRADE_REGISTRY.push({ key: d.key, weaponId: sw.id, stat: d.stat, maxLevel: d.maxLevel });
+          }
+        }
       }
+      // Re-apply persisted shop upgrades now that the registry is populated.
+      applyUpgradeLevels(this.economy.levels);
+      this.weapons.applyWeapon();
       this.render();
     }
     _loadShop() {
@@ -5381,15 +5423,8 @@ window.LoadoutAPI = null;
       this.economy.cash -= cost;
       this.economy.levels[upgDef.key] = level + 1;
       this.economy.save();
-      // Apply upgrade
-      const w = WEAPONS[weaponId];
-      const base = BASE_WEAPONS[weaponId];
-      if (w && base) {
-        const newLevel = level + 1;
-        if (upgDef.stat === 'damage') w.damage = Math.round(base.damage * (1 + newLevel * 0.08));
-        else if (upgDef.stat === 'fireRate') w.fireRate = +(base.fireRate * (1 + newLevel * 0.06)).toFixed(2);
-        else if (upgDef.stat === 'magSize') w.magSize = base.magSize + Math.max(newLevel, Math.round(base.magSize * 0.12 * newLevel));
-      }
+      // Re-run the central recompute so all upgrade tiers (base + shop) stay consistent.
+      applyUpgradeLevels(this.economy.levels);
       this.weapons.applyWeapon();
       this.weapons.buildGun();
       this.render();
