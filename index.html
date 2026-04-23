@@ -679,6 +679,106 @@ html, body {
   #upgrade-cash { text-align: left; font-size: 24px; }
   .upgrade-card { min-height: 0; }
 }
+
+/* === ADS SCOPE OVERLAYS === */
+#scope-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+  display: none;
+}
+#scope-overlay.sniper-scope {
+  display: block;
+  background: radial-gradient(circle at center, transparent 18%, rgba(0,0,0,0.97) 22%);
+}
+#scope-overlay.sniper-scope::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 0; bottom: 0; width: 1px;
+  background: rgba(0,0,0,0.7);
+  transform: translateX(-50%);
+}
+#scope-overlay.sniper-scope::after {
+  content: "";
+  position: absolute;
+  top: 50%; left: 0; right: 0; height: 1px;
+  background: rgba(0,0,0,0.7);
+  transform: translateY(-50%);
+}
+#scope-overlay .sniper-mil {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 200px; height: 200px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 50%;
+  pointer-events: none;
+}
+#scope-overlay .sniper-mil::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 80px; height: 80px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 50%;
+}
+#scope-overlay.reflex-scope {
+  display: block;
+}
+#scope-overlay .reflex-dot {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 6px; height: 6px;
+  background: rgba(255,60,60,0.9);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px rgba(255,60,60,0.6), 0 0 2px rgba(255,60,60,1);
+}
+#scope-overlay .reflex-ring {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 28px; height: 28px;
+  border: 1px solid rgba(255,60,60,0.25);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+/* Loadout HUD slot labels */
+#hud-loadout-slots {
+  position: absolute;
+  right: 24px;
+  bottom: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: monospace;
+  font-size: 11px;
+  color: #888;
+  text-align: right;
+  text-shadow: 0 0 4px rgba(0,0,0,.8);
+}
+#hud-loadout-slots .loadout-slot {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,.05);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+#hud-loadout-slots .loadout-slot .slot-label {
+  color: #666;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+#hud-loadout-slots .loadout-slot.active {
+  color: #ffd54f;
+  background: rgba(255,213,79,.12);
+  border-color: rgba(255,213,79,.3);
+}
+
 </style>
 </head>
 <body>
@@ -699,7 +799,15 @@ html, body {
     <div id="hud-ammo">30</div>
     <div id="hud-reserve">/ 120</div>
   </div>
-  <div id="hud-weapon-slots"></div>
+  <div id="hud-weapon-slots" style="display:none"></div>
+
+<div id="scope-overlay">
+  <div class="sniper-mil"></div>
+  <div class="reflex-dot"></div>
+  <div class="reflex-ring"></div>
+</div>
+<div id="hud-loadout-slots"></div>
+
   <div id="crosshair">
     <div class="line top"></div>
     <div class="line bottom"></div>
@@ -2579,7 +2687,8 @@ class PlayerController {
       return;
     }
     // Look
-    const sens = this.input.mouseRight ? this.settings.get('aimSensitivity') : this.settings.get('sensitivity');
+    const _adsMult = (window.__ADS_SCOPE__ && this.input.mouseRight) ? window.__ADS_SCOPE__.getAimSensitivityMult(engine.weapons ? engine.weapons.state.currentWeaponId : 'assault_rifle') : 1.0;
+    const sens = this.input.mouseRight ? this.settings.get('aimSensitivity') * _adsMult : this.settings.get('sensitivity');
     this.state.yaw   -= this.input.mouseDeltaX * sens;
     this.state.pitch -= this.input.mouseDeltaY * sens * (this.settings.get('invertY') ? -1 : 1);
     this.state.pitch = Math.max(-this.MAX_PITCH, Math.min(this.MAX_PITCH, this.state.pitch));
@@ -3618,6 +3727,8 @@ class WeaponSystem {
       s.isReloading = false; s.reloadTimer = 0;
       s.isHealing = false; s.healTimer = 0;
       this.applyWeapon(); this.buildGun();
+      // Apply weapon skin on switch
+      if (window.SkinAPI) window.SkinAPI.applyToViewModel(this.viewModel, this.state.currentWeaponId);
       if (SOUND) SOUND.switchWeapon();
     }
     if (d.isMedpack) {
@@ -4341,22 +4452,25 @@ class HUDManager {
     this.buildWeaponSlots();
   }
   buildWeaponSlots() {
-    const sl = this.el.weaponSlots;
+    const sl = document.getElementById('hud-loadout-slots');
     if (!sl) return;
     sl.innerHTML = '';
     for (let i = 0; i < this.weapon.weaponIds.length; i++) {
       const id = this.weapon.weaponIds[i];
+      const slotLabel = window.LoadoutAPI ? window.LoadoutAPI.getSlotLabel(id) : '';
       const div = document.createElement('div');
-      div.className = 'slot';
+      div.className = 'loadout-slot';
       div.dataset.idx = i;
-      div.textContent = (i + 1) + ' ' + WEAPONS[id].name;
+      div.innerHTML = '<span class="slot-label">' + slotLabel + '</span><span>' + (i + 1) + ' ' + WEAPONS[id].name + '</span>';
       sl.appendChild(div);
     }
   }
   updateWeaponSlots() {
     if (this._lastWeaponIdx === this.weapon.weaponIndex) return;
     this._lastWeaponIdx = this.weapon.weaponIndex;
-    const slots = this.el.weaponSlots.children;
+    const sl = document.getElementById('hud-loadout-slots');
+    if (!sl) return;
+    const slots = sl.children;
     for (let i = 0; i < slots.length; i++) slots[i].classList.toggle('active', i === this.weapon.weaponIndex);
   }
   showDamageFlash() {
@@ -4734,6 +4848,223 @@ class CameraController {
   }
 }
 
+
+// ============================================================
+// SKIN API — Data-driven texture/color swapping
+// ============================================================
+class SkinManager {
+  constructor() {
+    this.playerSkins = {
+      default:  { body: 0x6a87aa, head: 0xe6ba91, legs: 0x2c3245, shirt: 0x394a6b },
+      arctic:   { body: 0xc8d6e5, head: 0xe6ba91, legs: 0xaabbc8, shirt: 0xdde4eb },
+      shadow:   { body: 0x1a1a2e, head: 0x8c7a6b, legs: 0x0f0f1a, shirt: 0x16213e },
+      desert:   { body: 0xa89060, head: 0xd4a574, legs: 0x8a7448, shirt: 0xc4a870 },
+      crimson:  { body: 0x8b2020, head: 0xe6ba91, legs: 0x4a1010, shirt: 0xa03030 },
+      neon:     { body: 0x00ff88, head: 0xe6ba91, legs: 0x006644, shirt: 0x00cc66 },
+    };
+    this.weaponSkins = {
+      default:      {},
+      gold:         { assault_rifle: 0xffd700, sniper: 0xffd700, smg: 0xffd700, shotgun: 0xffd700, lmg: 0xffd700, dmr: 0xffd700, pistol: 0xffd700, melee: 0xffd700 },
+      carbon:       { assault_rifle: 0x1a1a1a, sniper: 0x1a1a1a, smg: 0x1a1a1a, shotgun: 0x1a1a1a, lmg: 0x1a1a1a, dmr: 0x1a1a1a, pistol: 0x1a1a1a, melee: 0x1a1a1a },
+      digital_camo: { assault_rifle: 0x4a6b3a, sniper: 0x3a5a2a, smg: 0x5a7b4a, shotgun: 0x3a5a2a, lmg: 0x4a6b3a, dmr: 0x5a7b4a, pistol: 0x4a6b3a, melee: 0x6a8b5a },
+      plasma:       { assault_rifle: 0x4a00ff, sniper: 0x6a20ff, smg: 0x3a00dd, shotgun: 0x5a10ff, lmg: 0x4a00ff, dmr: 0x6a20ff, pistol: 0x3a00dd, melee: 0x8a40ff },
+      tiger:        { assault_rifle: 0xff8800, sniper: 0xff6600, smg: 0xff9900, shotgun: 0xff7700, lmg: 0xff8800, dmr: 0xff6600, pistol: 0xff9900, melee: 0xffaa00 },
+    };
+    this.activePlayerSkin = 'default';
+    this.activeWeaponSkin = 'default';
+    this._load();
+  }
+  _load() {
+    try {
+      const d = JSON.parse(localStorage.getItem('krnk_skins') || '{}');
+      if (d.player && this.playerSkins[d.player]) this.activePlayerSkin = d.player;
+      if (d.weapon && this.weaponSkins[d.weapon]) this.activeWeaponSkin = d.weapon;
+    } catch {}
+  }
+  _save() {
+    try { localStorage.setItem('krnk_skins', JSON.stringify({ player: this.activePlayerSkin, weapon: this.activeWeaponSkin })); } catch {}
+  }
+  setPlayerSkin(name) {
+    if (!this.playerSkins[name]) return false;
+    this.activePlayerSkin = name; this._save(); return true;
+  }
+  setWeaponSkin(name) {
+    if (!this.weaponSkins[name]) return false;
+    this.activeWeaponSkin = name; this._save(); return true;
+  }
+  getPlayerColors() { return this.playerSkins[this.activePlayerSkin] || this.playerSkins.default; }
+  getWeaponColor(weaponId) {
+    const skin = this.weaponSkins[this.activeWeaponSkin];
+    if (!skin || !skin[weaponId]) return null;
+    return skin[weaponId];
+  }
+  listPlayerSkins() { return Object.keys(this.playerSkins); }
+  listWeaponSkins() { return Object.keys(this.weaponSkins); }
+  // Apply skin to a weapon's viewmodel children
+  applyToViewModel(viewModel, weaponId) {
+    const color = this.getWeaponColor(weaponId);
+    if (!color) return;
+    viewModel.traverse(child => {
+      if (child.isMesh && child.material && !child.material._isMuzzle) {
+        child.material.color.setHex(color);
+      }
+    });
+  }
+  // Apply skin to camera controller's local body
+  applyToLocalBody(localBody) {
+    const colors = this.getPlayerColors();
+    localBody.traverse(child => {
+      if (!child.isMesh) return;
+      const mat = child.material;
+      if (!mat) return;
+      const c = mat.color.getHex();
+      // Map original body colors to skin colors
+      if (c === 0x6a87aa || mat._skinRole === 'body') { mat.color.setHex(colors.body); mat._skinRole = 'body'; }
+      else if (c === 0xe6ba91 || mat._skinRole === 'head') { mat.color.setHex(colors.head); mat._skinRole = 'head'; }
+      else if (c === 0x2c3245 || mat._skinRole === 'legs') { mat.color.setHex(colors.legs); mat._skinRole = 'legs'; }
+      else if (c === 0x394a6b || mat._skinRole === 'shirt') { mat.color.setHex(colors.shirt); mat._skinRole = 'shirt'; }
+    });
+  }
+}
+
+// ============================================================
+// LOADOUT MANAGER — Fixed slot-based loadout system
+// ============================================================
+const LOADOUT_SLOTS = {
+  PRIMARY:   { label: 'PRIMARY',   key: '1', weapons: ['assault_rifle', 'smg', 'sniper', 'shotgun', 'lmg', 'dmr'] },
+  SECONDARY: { label: 'SECONDARY', key: '2', weapons: ['pistol'] },
+  MELEE:     { label: 'MELEE',     key: '3', weapons: ['melee'] },
+  EQUIPMENT: { label: 'EQUIP',     key: '4', weapons: ['medpack', 'turret', 'orbital'] },
+};
+
+class LoadoutManager {
+  constructor() {
+    this.loadout = {
+      primary:   'assault_rifle',
+      secondary: 'pistol',
+      melee:     'melee',
+    };
+    this._load();
+  }
+  _load() {
+    try {
+      const d = JSON.parse(localStorage.getItem('krnk_loadout') || '{}');
+      if (d.primary && LOADOUT_SLOTS.PRIMARY.weapons.includes(d.primary)) this.loadout.primary = d.primary;
+      if (d.secondary && LOADOUT_SLOTS.SECONDARY.weapons.includes(d.secondary)) this.loadout.secondary = d.secondary;
+    } catch {}
+  }
+  _save() {
+    try { localStorage.setItem('krnk_loadout', JSON.stringify(this.loadout)); } catch {}
+  }
+  setPrimary(weaponId) {
+    if (!LOADOUT_SLOTS.PRIMARY.weapons.includes(weaponId)) return false;
+    this.loadout.primary = weaponId; this._save(); return true;
+  }
+  setSecondary(weaponId) {
+    if (!LOADOUT_SLOTS.SECONDARY.weapons.includes(weaponId)) return false;
+    this.loadout.secondary = weaponId; this._save(); return true;
+  }
+  getActiveWeaponIds(isAdmin = false) {
+    const ids = [this.loadout.primary, this.loadout.secondary, this.loadout.melee, 'medpack'];
+    if (isAdmin) ids.unshift('gold_gun');
+    // Add killstreak weapons at end
+    ids.push('turret', 'orbital');
+    return ids;
+  }
+  getSlotLabel(weaponId) {
+    if (LOADOUT_SLOTS.PRIMARY.weapons.includes(weaponId)) return 'PRIMARY';
+    if (LOADOUT_SLOTS.SECONDARY.weapons.includes(weaponId)) return 'SECONDARY';
+    if (weaponId === 'melee') return 'MELEE';
+    if (weaponId === 'medpack') return 'EQUIP';
+    if (weaponId === 'turret' || weaponId === 'orbital') return 'STREAK';
+    if (weaponId === 'gold_gun') return 'ADMIN';
+    return '';
+  }
+}
+
+// ============================================================
+// ADS SCOPE MANAGER — Per-weapon scope overlays
+// ============================================================
+class ADSScopeManager {
+  constructor(camera, settings) {
+    this.camera = camera;
+    this.settings = settings;
+    this.overlayEl = document.getElementById('scope-overlay');
+    this.crosshairEl = document.getElementById('crosshair');
+    this.isScoped = false;
+    this.currentScope = null; // 'sniper' | 'reflex' | null
+    this.scopeZoomLerp = 0;
+    // Per-weapon scope config
+    this.scopeConfig = {
+      sniper:        { type: 'sniper',  fovMult: 0.25, sensitivity: 0.3 },
+      dmr:           { type: 'reflex',  fovMult: 0.55, sensitivity: 0.55 },
+      assault_rifle: { type: 'reflex',  fovMult: 0.70, sensitivity: 0.65 },
+      lmg:           { type: 'reflex',  fovMult: 0.72, sensitivity: 0.65 },
+      smg:           { type: null,      fovMult: 0.80, sensitivity: 0.75 },
+      shotgun:       { type: null,      fovMult: 0.82, sensitivity: 0.80 },
+      pistol:        { type: null,      fovMult: 0.80, sensitivity: 0.75 },
+      gold_gun:      { type: 'reflex',  fovMult: 0.60, sensitivity: 0.55 },
+    };
+    this._baseFov = settings.get('fov');
+    this._targetFov = this._baseFov;
+  }
+  getScopeConfig(weaponId) {
+    return this.scopeConfig[weaponId] || { type: null, fovMult: 0.80, sensitivity: 0.75 };
+  }
+  setAiming(isAiming, weaponId) {
+    const config = this.getScopeConfig(weaponId);
+    if (isAiming && config.type) {
+      if (!this.isScoped || this.currentScope !== config.type) {
+        this._showScope(config.type);
+      }
+      this.isScoped = true;
+      this.currentScope = config.type;
+      this._targetFov = this.settings.get('fov') * config.fovMult;
+    } else {
+      if (this.isScoped) this._hideScope();
+      this.isScoped = false;
+      this.currentScope = null;
+      this._targetFov = this.settings.get('fov');
+    }
+    return config;
+  }
+  _showScope(type) {
+    if (!this.overlayEl) return;
+    this.overlayEl.className = '';
+    if (type === 'sniper') {
+      this.overlayEl.classList.add('sniper-scope');
+      if (this.crosshairEl) this.crosshairEl.style.display = 'none';
+    } else if (type === 'reflex') {
+      this.overlayEl.classList.add('reflex-scope');
+      if (this.crosshairEl) this.crosshairEl.style.display = 'none';
+    }
+  }
+  _hideScope() {
+    if (this.overlayEl) {
+      this.overlayEl.className = '';
+      this.overlayEl.style.display = 'none';
+    }
+    if (this.crosshairEl) this.crosshairEl.style.display = 'block';
+  }
+  getAimSensitivityMult(weaponId) {
+    const config = this.getScopeConfig(weaponId);
+    return this.isScoped ? config.sensitivity : 1.0;
+  }
+  update(dt) {
+    // Smooth FOV zoom
+    const currentFov = this.camera.fov;
+    const diff = this._targetFov - currentFov;
+    if (Math.abs(diff) > 0.1) {
+      this.camera.fov += diff * Math.min(1, 12 * dt);
+      this.camera.updateProjectionMatrix();
+    }
+  }
+}
+
+// Expose APIs globally for console/dev access
+window.SkinAPI = null;
+window.LoadoutAPI = null;
+
 // ============================================================
 // BOOTSTRAP
 // ============================================================
@@ -4749,6 +5080,10 @@ class CameraController {
   const connError = document.getElementById('conn-error');
   const settings = new SettingsManager();
   SOUND = new SoundManager(settings);
+  const skinManager = new SkinManager();
+  const loadoutManager = new LoadoutManager();
+  window.SkinAPI = skinManager;
+  window.LoadoutAPI = loadoutManager;
   const engine = new GameEngine(canvas, settings);
   const input = new InputManager(canvas);
   const network = new NetworkManager();
@@ -4761,6 +5096,18 @@ class CameraController {
   const remotePlayers = new RemotePlayerManager(engine.scene, network, settings);
   const tracers = new TracerSystem(engine.scene);
   const weapons = new WeaponSystem(engine.camera, input, player, engine.scene, map, network, bots, tracers);
+  const adsScope = new ADSScopeManager(engine.camera, settings);
+  window.__ADS_SCOPE__ = adsScope;
+  // Apply loadout-based weapon list
+  const _isAdmin2 = (window.__PLAYER_ROLE === 'admin');
+  weapons.weaponIds = loadoutManager.getActiveWeaponIds(_isAdmin2);
+  weapons.weaponIndex = _isAdmin2 ? 1 : 0;
+  weapons.state.currentWeaponId = weapons.weaponIds[weapons.weaponIndex];
+  weapons.applyWeapon();
+  weapons.buildGun();
+  // Apply weapon skin after build
+  skinManager.applyToViewModel(weapons.viewModel, weapons.state.currentWeaponId);
+
   const destruction = new DestructionManager(engine.scene, map);
   const grenades = new GrenadeSystem(engine.scene, map, player, network, bots, input, weapons, destruction);
   const hud = new HUDManager(player, weapons, network, input, bots);
@@ -5116,6 +5463,8 @@ class CameraController {
   window.__BLOOD__ = bloodFX;
 
   const cameraCtrl = new CameraController(engine.camera, engine.scene, input, settings, map, weapons, player);
+  // Apply player skin to local body model
+  skinManager.applyToLocalBody(cameraCtrl.localBody);
   engine.cameraCtrl = cameraCtrl;
   engine.weapons = weapons;
   engine.scene.add(engine.camera);
@@ -5157,6 +5506,21 @@ class CameraController {
   engine.registerSystem({ update() { economy.update(); if (upgradeMenu.isOpen) upgradeMenu.render(); } });
   engine.registerSystem({ update(dt) { bloodFX.update(dt); } });
   engine.registerSystem({ update(dt) { tracers.update(dt); } });
+  // ADS Scope system - manages scope overlays and FOV zoom
+  engine.registerSystem({
+    update(dt) {
+      const ws = weapons.state;
+      const isAiming = ws.isAiming && !player.isSprinting;
+      const scopeCfg = adsScope.setAiming(isAiming, ws.currentWeaponId);
+      adsScope.update(dt);
+      // Hide viewmodel when using sniper scope for clean magnification view
+      if (adsScope.isScoped && adsScope.currentScope === 'sniper' && cameraCtrl.mode === 'first') {
+        weapons.viewModel.visible = false;
+      } else if (cameraCtrl.mode === 'first') {
+        weapons.viewModel.visible = true;
+      }
+    }
+  });
   engine.registerSystem({ update(dt) { dmgDir.update(dt); } });
 
   let gameStarted = false;
@@ -5207,6 +5571,9 @@ class CameraController {
     weapons.state.orbitalCharges = 9;
     if (weapons.applyWeapon) weapons.applyWeapon();
     if (weapons.buildGun) weapons.buildGun();
+    if (window.SkinAPI) window.SkinAPI.applyToViewModel(weapons.viewModel, weapons.state.currentWeaponId);
+    // Update loadout for admin
+    weapons.weaponIds = loadoutManager.getActiveWeaponIds(true);
   }
   function attemptAdminLogin() {
     const pw = rolePwInput.value;
@@ -5328,428 +5695,5 @@ class CameraController {
   console.log('[KRNK] Ready — Hazmob-style peek, tracers, dynamic crosshair, realistic FX');
 })();
 </script>
-<script data-designer2-injected>
-/**
- * Designer 2.0 — iframe inject script.
- *
- * Injected by the backend into every HTML file served from the preview endpoint.
- * Provides: console forwarding, error capture, height reporting,
- * remote JS eval, window.claude.complete() (Haiku callback),
- * Design Mode (element selection + data-cc-id), Tweaks protocol,
- * Babel JSX auto-config, and escape key forwarding.
- */
-(function () {
-  var P = window.parent;
-  if (!P || P === window) return;
-
-  // ── Origin verification ────────────────────────────────────────────
-  var ALLOWED_ORIGINS = [
-    location.origin,
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://www.genspark.ai',
-    'https://genspark.ai',
-    'https://www.coswift.ai',
-    'https://coswift.ai',
-  ];
-
-  function isAllowedOrigin(origin) {
-    if (!origin) return true;
-    for (var i = 0; i < ALLOWED_ORIGINS.length; i++) {
-      if (origin === ALLOWED_ORIGINS[i]) return true;
-    }
-    return origin.endsWith('.genspark.ai') || origin.endsWith('.coswift.ai') || origin.endsWith('.genspark.site');
-  }
-
-  // ── Console forwarding ──────────────────────────────────────────────
-  ['log', 'warn', 'error'].forEach(function (k) {
-    var orig = console[k];
-    console[k] = function () {
-      var msg = Array.prototype.slice
-        .call(arguments)
-        .map(function (a) {
-          try {
-            return typeof a === 'object' ? JSON.stringify(a) : String(a);
-          } catch (e) {
-            return '[unstringifiable]';
-          }
-        })
-        .join(' ');
-      try {
-        P.postMessage({ __designer2_log: true, type: k, data: msg }, '*');
-      } catch (e) {}
-      orig.apply(console, arguments);
-    };
-  });
-
-  // ── Global error forwarding ─────────────────────────────────────────
-  window.addEventListener(
-    'error',
-    function (e) {
-      var t = e.target;
-      if (t && t !== window && t.tagName) {
-        P.postMessage(
-          {
-            __designer2_log: true,
-            type: 'resource_error',
-            data: t.tagName + ' failed to load: ' + (t.src || t.href || ''),
-          },
-          '*'
-        );
-      } else {
-        P.postMessage(
-          {
-            __designer2_log: true,
-            type: 'error',
-            data:
-              (e.message || 'Error') +
-              ' at ' +
-              (e.filename || '?') +
-              ':' +
-              (e.lineno || 0),
-          },
-          '*'
-        );
-      }
-    },
-    true
-  );
-
-  window.addEventListener('unhandledrejection', function (e) {
-    var r = e.reason;
-    var msg = r instanceof Error ? r.message + ' ' + r.stack : String(r);
-    P.postMessage(
-      { __designer2_log: true, type: 'error', data: 'Unhandled rejection: ' + msg },
-      '*'
-    );
-  });
-
-  // ── Height reporting ────────────────────────────────────────────────
-  function reportHeight() {
-    try {
-      P.postMessage(
-        { type: 'designer2:height', height: document.documentElement.scrollHeight },
-        '*'
-      );
-    } catch (e) {}
-  }
-  if (document.readyState === 'complete') reportHeight();
-  else window.addEventListener('load', reportHeight);
-  if (window.ResizeObserver)
-    new ResizeObserver(reportHeight).observe(document.documentElement);
-
-  // ── Escape key forwarding ───────────────────────────────────────────
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') {
-      P.postMessage({ type: 'escape-pressed' }, '*');
-    }
-  });
-
-  // ── Remote JS eval (__d2_eval) ──────────────────────────────────────
-  // ── window.claude.complete() responses (__d2_api_r) ─────────────────
-  // ── Tweaks activation (__activate_edit_mode / __deactivate_edit_mode)
-  window.addEventListener('message', function (e) {
-    if (!e.data) return;
-    if (!isAllowedOrigin(e.origin)) return;
-
-    // Remote eval
-    if (e.data.__d2_eval) {
-      var evalId = e.data.id;
-      function respond(payload) {
-        e.source.postMessage(
-          Object.assign(payload, { __d2_eval_r: 1, id: evalId }),
-          e.origin === 'null' ? '*' : e.origin
-        );
-      }
-      try {
-        var result = eval(e.data.code);
-        if (result && typeof result.then === 'function') {
-          result.then(
-            function (v) { respond({ ok: 1, v: JSON.stringify(v) }); },
-            function (err) { respond({ ok: 0, e: String(err) }); }
-          );
-        } else {
-          respond({ ok: 1, v: JSON.stringify(result) });
-        }
-      } catch (err) {
-        respond({ ok: 0, e: String(err) });
-      }
-      return;
-    }
-
-    // Claude API responses (streaming)
-    if (e.data.__d2_api_r) {
-      var req = _d2_pending[e.data.id];
-      if (!req) return;
-      if (e.data.error != null) {
-        clearTimeout(req.t);
-        delete _d2_pending[e.data.id];
-        req.reject(new Error(e.data.error));
-      } else if (e.data.chunk != null) {
-        clearTimeout(req.t);
-        req.t = req.arm();
-        req.text += e.data.chunk;
-      } else if (e.data.done) {
-        clearTimeout(req.t);
-        delete _d2_pending[e.data.id];
-        req.resolve(e.data.text != null ? e.data.text : req.text);
-      }
-      return;
-    }
-
-    // Tweaks activation / deactivation
-    if (e.data.type === '__activate_edit_mode') {
-      _tweaksActive = true;
-      window.dispatchEvent(new CustomEvent('designer2:tweaks-activate'));
-      return;
-    }
-    if (e.data.type === '__deactivate_edit_mode') {
-      _tweaksActive = false;
-      window.dispatchEvent(new CustomEvent('designer2:tweaks-deactivate'));
-      return;
-    }
-
-    // Tweaks value updates from host
-    if (e.data.type === '__edit_mode_set_keys' && e.data.edits) {
-      window.dispatchEvent(
-        new CustomEvent('designer2:tweaks-update', { detail: e.data.edits })
-      );
-      return;
-    }
-
-    // Screenshot capture
-    if (e.data.type === '__d2_screenshot') {
-      _captureScreenshot(e.data.id);
-      return;
-    }
-
-    // Speaker notes request
-    if (e.data.type === '__d2_get_speaker_notes') {
-      _sendSpeakerNotes();
-      return;
-    }
-
-    // Probe edit mode — relay to the page so LLM-generated code can respond.
-    // Only the page itself knows if it implemented the tweaks protocol; the
-    // inject script must NOT reply unconditionally.
-    if (e.data.type === '__probe_edit_mode') {
-      window.dispatchEvent(new CustomEvent('designer2:probe-edit-mode'));
-      return;
-    }
-
-    // Design Mode activation
-    if (e.data.type === '__DESIGNER_ACTIVATE') { _dmActive = true; return; }
-    if (e.data.type === '__DESIGNER_DEACTIVATE') { _dmActive = false; return; }
-  });
-
-  // ── window.claude.complete() ────────────────────────────────────────
-  var _d2_pending = {};
-  var _d2_seq = 0;
-  var _d2_timeout = 30000;
-  var _tweaksActive = false;
-
-  window.claude = {
-    complete: function (body) {
-      return new Promise(function (resolve, reject) {
-        var id = 'd2_' + ++_d2_seq;
-        var arm = function () {
-          return setTimeout(function () {
-            delete _d2_pending[id];
-            reject(new Error('claude.complete: timeout after ' + _d2_timeout / 1000 + 's'));
-          }, _d2_timeout);
-        };
-        var timer = arm();
-        _d2_pending[id] = { resolve: resolve, reject: reject, text: '', t: timer, arm: arm };
-        try {
-          P.postMessage({ __d2_api: true, id: id, body: body }, '*');
-        } catch (err) {
-          clearTimeout(timer);
-          delete _d2_pending[id];
-          reject(err);
-        }
-      });
-    },
-  };
-
-  // ── Screenshot capture ──────────────────────────────────────────────
-  var _html2canvasLoaded = false;
-  var _html2canvasLoading = false;
-
-  var _html2canvasLoadError = null;
-
-  function _loadHtml2Canvas(cb) {
-    if (_html2canvasLoaded && window.html2canvas) { cb(); return; }
-    if (_html2canvasLoadError) { cb(_html2canvasLoadError); return; }
-    if (_html2canvasLoading) {
-      var check = setInterval(function () {
-        if (_html2canvasLoaded) { clearInterval(check); cb(); }
-        else if (_html2canvasLoadError) { clearInterval(check); cb(_html2canvasLoadError); }
-      }, 100);
-      return;
-    }
-    _html2canvasLoading = true;
-    var s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-    s.onload = function () { _html2canvasLoaded = true; _html2canvasLoading = false; cb(); };
-    s.onerror = function () {
-      _html2canvasLoadError = new Error('Failed to load html2canvas');
-      _html2canvasLoading = false;
-      cb(_html2canvasLoadError);
-    };
-    document.head.appendChild(s);
-  }
-
-  function _captureScreenshot(requestId) {
-    _loadHtml2Canvas(function (err) {
-      if (err) {
-        P.postMessage({ type: '__d2_screenshot_result', id: requestId, error: err.message }, '*');
-        return;
-      }
-      try {
-        window.html2canvas(document.body, {
-          useCORS: true,
-          allowTaint: true,
-          scale: window.devicePixelRatio || 1,
-          logging: false,
-        }).then(function (canvas) {
-          var dataUrl = canvas.toDataURL('image/png');
-          P.postMessage({ type: '__d2_screenshot_result', id: requestId, data: dataUrl }, '*');
-        }).catch(function (captureErr) {
-          P.postMessage({ type: '__d2_screenshot_result', id: requestId, error: String(captureErr) }, '*');
-        });
-      } catch (syncErr) {
-        P.postMessage({ type: '__d2_screenshot_result', id: requestId, error: String(syncErr) }, '*');
-      }
-    });
-  }
-
-  // ── Speaker Notes ────────────────────────────────────────────────────
-  // Extract notes from <script type="application/json" id="speaker-notes">
-  // and forward slideIndexChanged events to the parent.
-  function _sendSpeakerNotes() {
-    var notesEl = document.getElementById('speaker-notes');
-    var notes = [];
-    if (notesEl) {
-      try {
-        var parsed = JSON.parse(notesEl.textContent);
-        if (Array.isArray(parsed)) notes = parsed;
-      } catch (e) { /* ignore parse errors */ }
-    }
-    P.postMessage({ speakerNotes: notes }, '*');
-  }
-
-  // Forward slideIndexChanged from slide decks (e.g. Reveal.js)
-  // so the parent SpeakerNotes panel can track the current slide.
-  window.addEventListener('message', function (e) {
-    if (e.data && typeof e.data.slideIndexChanged === 'number' && e.source === window) {
-      P.postMessage({ slideIndexChanged: e.data.slideIndexChanged }, '*');
-    }
-  });
-
-  // Also listen for Reveal.js-style events directly
-  document.addEventListener('DOMContentLoaded', function () {
-    if (window.Reveal) {
-      try {
-        window.Reveal.on('slidechanged', function (ev) {
-          var idx = ev.indexh != null ? ev.indexh : 0;
-          P.postMessage({ slideIndexChanged: idx }, '*');
-        });
-      } catch (e) { /* ignore */ }
-    }
-  });
-
-  // ── Design Mode ─────────────────────────────────────────────────────
-  var _ccSeq = 1;
-  var _dmActive = false;
-
-  function ccStamp(el) {
-    if (!el.getAttribute('data-cc-id')) {
-      el.setAttribute('data-cc-id', 'cc-' + _ccSeq++);
-    }
-    return el.getAttribute('data-cc-id');
-  }
-
-  function domAncestry(el, limit) {
-    var chain = [];
-    var cur = el;
-    for (var i = 0; i < (limit || 6) && cur && cur !== document.body; i++) {
-      var tag = cur.tagName.toLowerCase();
-      var elId = cur.id ? '#' + cur.id : '';
-      var cls =
-        cur.className && typeof cur.className === 'string'
-          ? '.' + cur.className.split(' ').slice(0, 2).join('.')
-          : '';
-      var label = cur.getAttribute('data-screen-label');
-      var labelStr = label ? '[' + label + ']' : '';
-      chain.push(tag + elId + cls + labelStr);
-      cur = cur.parentElement;
-    }
-    return chain.join(' > ');
-  }
-
-  document.addEventListener(
-    'click',
-    function (ev) {
-      if (!_dmActive) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      var el = ev.target;
-      P.postMessage(
-        {
-          type: '__DESIGNER_ELEMENT_SELECTED__',
-          data: {
-            ccId: ccStamp(el),
-            dom: domAncestry(el),
-            tag: el.tagName.toLowerCase(),
-            text: (el.textContent || '').slice(0, 80).trim(),
-            rect: el.getBoundingClientRect().toJSON(),
-          },
-        },
-        '*'
-      );
-    },
-    true
-  );
-
-  document.addEventListener(
-    'mouseover',
-    function (ev) {
-      if (!_dmActive) return;
-      var el = ev.target;
-      ccStamp(el);
-      P.postMessage(
-        {
-          type: '__DESIGNER_ELEMENT_HOVERED__',
-          data: {
-            ccId: el.getAttribute('data-cc-id'),
-            dom: domAncestry(el),
-            rect: el.getBoundingClientRect().toJSON(),
-          },
-        },
-        '*'
-      );
-    },
-    true
-  );
-
-  // ── Babel JSX auto-config ───────────────────────────────────────────
-  document.addEventListener('DOMContentLoaded', function () {
-    document
-      .querySelectorAll('script[type="text/babel"],script[type="text/jsx"]')
-      .forEach(function (s, i) {
-        var plugins = s.getAttribute('data-plugins') || '';
-        var srcPlugin = 'transform-react-jsx-source';
-        if (plugins.indexOf(srcPlugin) < 0) {
-          s.setAttribute('data-plugins', plugins ? plugins + ',' + srcPlugin : srcPlugin);
-        }
-        if (!s.hasAttribute('data-filename')) {
-          s.setAttribute('data-filename', s.getAttribute('src') || 'inline-' + i);
-        }
-      });
-  });
-
-})();
-
-</script><script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
