@@ -1361,7 +1361,7 @@ const WORLD_HALF   = WORLD_HALF_X;
 const PLAYER_RADIUS = 0.42;
 const PLAYER_HEIGHT = 1.7;
 const PLAYER_EYE    = 1.6;
-const STEP_HEIGHT   = 0.65;
+const STEP_HEIGHT   = 0.95;
 const BOT_COUNT     = 8;
 const LADDER_CLIMB_SPEED   = 6.2;
 const LADDER_DESCEND_SPEED = 5.5;
@@ -2049,9 +2049,16 @@ class MapBuilder {
       minX = x - reach / 2; maxX = x + reach / 2;
       minZ = z - w / 2; maxZ = z + w / 2;
     }
+    // Point on the structure the player should land on (1m past the ladder face,
+    // in the direction the ladder faces — i.e. into the building).
+    let topX = x, topZ = z;
+    if (face === 'north')      topZ = z - 1.2;
+    else if (face === 'south') topZ = z + 1.2;
+    else if (face === 'east')  topX = x - 1.2;
+    else if (face === 'west')  topX = x + 1.2;
     this.ladders.push({
       minX, maxX, minY: 0, maxY: h + 0.5,
-      minZ, maxZ, topY: h, group
+      minZ, maxZ, topY: h, topX, topZ, group
     });
     return group;
   }
@@ -2917,6 +2924,16 @@ class PlayerController {
   }
   takeDamage(amount, attackerName = 'Unknown') {
     if (this.state.isDead) return;
+    const cs = window.CHARACTER_STATS;
+    if (cs) {
+      const isExplosive = attackerName === 'Grenade' || attackerName === 'Mine' || attackerName === 'Molotov' || attackerName === 'Rocket';
+      // Ricochet: bullet bounces off — no damage applied. Skip explosive sources.
+      if (!isExplosive && cs.ricochet > 0 && Math.random() < cs.ricochet) return;
+      // Dodge: full hit avoidance (bullets only)
+      if (!isExplosive && cs.dodge > 0 && Math.random() < cs.dodge) return;
+      // Resistance: flat damage reduction
+      if (cs.resistance > 0) amount *= (1 - cs.resistance);
+    }
     this.state.health = Math.max(0, this.state.health - amount);
     if (this.state.health <= 0) {
       this.state.isDead = true;
@@ -2924,6 +2941,13 @@ class PlayerController {
       this.respawnTimer = RESPAWN_TIME;
       this.deathKiller = attackerName;
     }
+  }
+  tickRegen(dt) {
+    if (this.state.isDead) return;
+    const cs = window.CHARACTER_STATS;
+    if (!cs || cs.regenPerSec <= 0) return;
+    if (this.state.health >= this.state.maxHealth) return;
+    this.state.health = Math.min(this.state.maxHealth, this.state.health + cs.regenPerSec * dt);
   }
   getFeetY(pos = this.state.position) { return pos.y - PLAYER_HEIGHT; }
   findLadderNearby() {
@@ -2980,9 +3004,19 @@ class PlayerController {
         const c = colliders[i];
         if (c.minY >= newHeadY) continue;
         if (c.maxY <= bestTop + 0.01) continue;
-        if (boxContainsXZ(newX, newZ, c)) return false;
+        if (!boxContainsXZ(newX, newZ, c)) continue;
+        // If this overhead box is itself a small ledge above the chosen step
+        // (e.g. a roof lip on a building), pick IT as the step target instead
+        // of treating it as a blocker. Keeps building edges smooth & traversable.
+        const lipDiff = c.maxY - currentFeet;
+        if (lipDiff > 0 && lipDiff <= STEP_HEIGHT && c.maxY > bestTop) {
+          bestTop = c.maxY;
+          // Re-validate against this new (higher) step height in subsequent iters.
+          i = -1; continue;
+        }
+        return false;
       }
-      this.state.position.y = newHeadY;
+      this.state.position.y = bestTop + PLAYER_HEIGHT;
       this.state.position.x = newX;
       this.state.position.z = newZ;
       return true;
@@ -3083,6 +3117,7 @@ class PlayerController {
     return rawSigned;
   }
   update(dt, clock, engine) {
+    this.tickRegen(dt);
     if (this.state.isDead) {
       this.respawnTimer -= dt;
       if (this.respawnTimer <= 0) {
@@ -3189,12 +3224,33 @@ class PlayerController {
       if (this.input.isKeyDown('KeyS') || this.input.isKeyDown('ArrowDown')) vy -= LADDER_DESCEND_SPEED;
       const p = this.state.position;
       const nextY = p.y + vy * dt;
-      const maxTopY = ladder.topY + PLAYER_HEIGHT + 0.4;
+      // Scan for the highest surface near the top of the ladder (handles overhanging
+      // roof lips on sniper towers — climb past them, not into them).
+      const scanR = PLAYER_RADIUS + 0.4;
+      const fwdX = this._forward.x, fwdZ = this._forward.z;
+      const probeX = ladder.topX !== undefined ? ladder.topX : (p.x + fwdX * 0.6);
+      const probeZ = ladder.topZ !== undefined ? ladder.topZ : (p.z + fwdZ * 0.6);
+      const nearTop = this.map.queryColliders
+        ? this.map.queryColliders(probeX - scanR, probeX + scanR, probeZ - scanR, probeZ + scanR)
+        : this.map.colliders;
+      let surfaceTop = ladder.topY;
+      for (let i = 0; i < nearTop.length; i++) {
+        const c = nearTop[i];
+        if (c.maxY > surfaceTop && c.maxY <= ladder.topY + 1.2 &&
+            probeX >= c.minX - 0.05 && probeX <= c.maxX + 0.05 &&
+            probeZ >= c.minZ - 0.05 && probeZ <= c.maxZ + 0.05) {
+          surfaceTop = c.maxY;
+        }
+      }
+      const maxTopY = surfaceTop + PLAYER_HEIGHT + 0.5;
       if (vy > 0 && nextY > maxTopY) {
         this.state.velocity.y = 0;
         p.y = maxTopY;
-        this.state.velocity.x += this._forward.x * 2.5;
-        this.state.velocity.z += this._forward.z * 2.5;
+        // Strong forward nudge so the player clears any roof lip / overhang.
+        p.x += fwdX * (PLAYER_RADIUS + 0.35);
+        p.z += fwdZ * (PLAYER_RADIUS + 0.35);
+        this.state.velocity.x += fwdX * 3.5;
+        this.state.velocity.z += fwdZ * 3.5;
         this.state.isOnLadder = false;
       } else this.state.velocity.y = vy;
       if (mv.lengthSq() > 0.0001) {
@@ -3207,7 +3263,8 @@ class PlayerController {
     } else {
       const accel = this.state.isGrounded ? this.ACCEL : this.AIR_ACCEL;
       const friction = this.state.isGrounded ? (this.isSliding ? this.SLIDE_FRICTION : this.FRICTION) : this.AIR_FRICTION;
-      const maxSpeed = this.isSliding ? this.SLIDE_BOOST : (this.state.isCrouching ? this.CROUCH_SPEED : (this.isSprinting ? this.SPRINT_SPEED : this.MOVE_SPEED));
+      const _spdMul = (window.CHARACTER_STATS && window.CHARACTER_STATS.speedMult) || 1;
+      const maxSpeed = (this.isSliding ? this.SLIDE_BOOST : (this.state.isCrouching ? this.CROUCH_SPEED : (this.isSprinting ? this.SPRINT_SPEED : this.MOVE_SPEED))) * _spdMul;
       if (this.state.isGrounded) {
         const hSpeed = Math.hypot(this.state.velocity.x, this.state.velocity.z);
         if (hSpeed > 0.001) {
@@ -3236,7 +3293,8 @@ class PlayerController {
         else wall = this.wallContact;
       } else { this.wallContact = null; this._wallProbeT = 0; }
       if (this.state.isGrounded && this.input.isKeyPressed('Space') && !this.isSliding) {
-        this.state.velocity.y = this.JUMP;
+        const _jmpMul = (window.CHARACTER_STATS && window.CHARACTER_STATS.jumpMult) || 1;
+        this.state.velocity.y = this.JUMP * _jmpMul;
         this.state.isGrounded = false;
         if (SOUND) SOUND.jump();
       } else if (!this.state.isGrounded && wall && this.input.isKeyPressed('Space') && !this.isSliding &&
@@ -4262,6 +4320,53 @@ function applyUpgradeLevels(levels, mineSystem = null) {
   }
 }
 
+// ---- CHARACTER UPGRADES (capped, +1% per level on most stats) ----
+// Each entry: stat key, +per-level effect, hard maximum level.
+// Effects are applied centrally in applyCharacterUpgrades() and consumed by
+// PlayerController (speed/jump/health), takeDamage (resistance/dodge), and
+// WeaponSystem.fireOneBullet (ricochet check on victim).
+const CHARACTER_UPGRADE_DEFS = [
+  { key: 'char_speed',       label: 'Move Speed',      desc: '+0.5% movement & sprint speed per level.', maxLevel: 30, baseCost: 2500, stepCost: 1500, perLevel: 0.005, fmt: lvl => '+' + (lvl*0.5).toFixed(1) + '%' },
+  { key: 'char_jump',        label: 'Jump Height',     desc: '+0.5% jump impulse per level.',            maxLevel: 20, baseCost: 2500, stepCost: 1500, perLevel: 0.005, fmt: lvl => '+' + (lvl*0.5).toFixed(1) + '%' },
+  { key: 'char_health',      label: 'Max Health',      desc: '+1 HP per level (raises max & heal cap).', maxLevel: 50, baseCost: 2500, stepCost: 1500, perLevel: 1,     fmt: lvl => '+' + lvl + ' HP' },
+  { key: 'char_resistance',  label: 'Resistance',      desc: '−1% incoming damage per level.',           maxLevel: 25, baseCost: 2500, stepCost: 1500, perLevel: 0.01,  fmt: lvl => '−' + lvl + '%' },
+  { key: 'char_ricochet',    label: 'Ricochet Chance', desc: '+1% chance bullets ricochet off you (no damage).', maxLevel: 20, baseCost: 2500, stepCost: 1500, perLevel: 0.01, fmt: lvl => lvl + '%' },
+  { key: 'char_dodge',       label: 'Dodge Chance',    desc: '+0.5% chance to fully dodge non-explosive damage.', maxLevel: 20, baseCost: 2500, stepCost: 1500, perLevel: 0.005, fmt: lvl => (lvl*0.5).toFixed(1) + '%' },
+  { key: 'char_regen',       label: 'Health Regen',    desc: '+0.4 HP/s passive regen per level.',       maxLevel: 25, baseCost: 2500, stepCost: 1500, perLevel: 0.4,   fmt: lvl => '+' + (lvl*0.4).toFixed(1) + ' HP/s' },
+  { key: 'char_reload',      label: 'Reload Speed',    desc: '+0.5% faster weapon reloads per level.',   maxLevel: 20, baseCost: 2500, stepCost: 1500, perLevel: 0.005, fmt: lvl => '+' + (lvl*0.5).toFixed(1) + '%' },
+];
+// Global mutable bag, read by other systems each frame / on damage events.
+window.CHARACTER_STATS = {
+  speedMult: 1, jumpMult: 1, bonusHealth: 0, resistance: 0,
+  ricochet: 0, dodge: 0, regenPerSec: 0, reloadMult: 1,
+};
+function applyCharacterUpgrades(levels, player = null) {
+  const cs = window.CHARACTER_STATS;
+  cs.speedMult = 1; cs.jumpMult = 1; cs.bonusHealth = 0; cs.resistance = 0;
+  cs.ricochet = 0; cs.dodge = 0; cs.regenPerSec = 0; cs.reloadMult = 1;
+  for (const def of CHARACTER_UPGRADE_DEFS) {
+    const lvl = Math.min(levels[def.key] || 0, def.maxLevel);
+    if (!lvl) continue;
+    const v = lvl * def.perLevel;
+    if (def.key === 'char_speed')       cs.speedMult  = 1 + v;
+    else if (def.key === 'char_jump')   cs.jumpMult   = 1 + v;
+    else if (def.key === 'char_health') cs.bonusHealth= v;
+    else if (def.key === 'char_resistance') cs.resistance = Math.min(0.6, v);
+    else if (def.key === 'char_ricochet')   cs.ricochet   = Math.min(0.5, v);
+    else if (def.key === 'char_dodge')      cs.dodge      = Math.min(0.5, v);
+    else if (def.key === 'char_regen')      cs.regenPerSec= v;
+    else if (def.key === 'char_reload')     cs.reloadMult = Math.max(0.5, 1 - v);
+  }
+  if (player) {
+    const isAdmin = player.state && player.state.role === 'admin';
+    const baseMax = isAdmin ? 300 : 100;
+    const newMax = baseMax + cs.bonusHealth;
+    const ratio = player.state.health / Math.max(1, player.state.maxHealth);
+    player.state.maxHealth = newMax;
+    player.state.health = Math.min(newMax, Math.max(1, Math.round(newMax * ratio)));
+  }
+}
+
 // ---- Bullet tracer system (bright streaks muzzle→impact) ----
 class TracerSystem {
   constructor(scene) {
@@ -4676,7 +4781,7 @@ class WeaponSystem {
     if (s.isReloading) return;
     if (s.fireCooldown > 0) return;
     if (s.ammo <= 0) {
-      if (s.reserveAmmo > 0) { s.isReloading = true; s.reloadTimer = d.reloadTime; }
+      if (s.reserveAmmo > 0) { s.isReloading = true; s.reloadTimer = d.reloadTime * ((window.CHARACTER_STATS && window.CHARACTER_STATS.reloadMult) || 1); }
       return;
     }
     // === Fire-mode-aware trigger ===
@@ -4745,7 +4850,7 @@ class WeaponSystem {
     }
     if (SOUND) SOUND.gunshot(s.currentWeaponId);
     if (s.ammo <= 0 && s.reserveAmmo > 0) {
-      s.isReloading = true; s.reloadTimer = d.reloadTime;
+      s.isReloading = true; s.reloadTimer = d.reloadTime * ((window.CHARACTER_STATS && window.CHARACTER_STATS.reloadMult) || 1);
       if (SOUND) SOUND.reloadClick();
     }
   }
@@ -4812,7 +4917,7 @@ class WeaponSystem {
     } else {
       if (!s.isReloading) {
         if ((s.ammo <= 0 || this.input.isKeyPressed('KeyR')) && s.reserveAmmo > 0 && s.ammo < d.magSize) {
-          s.isReloading = true; s.reloadTimer = d.reloadTime; s.shotsFired = 0;
+          s.isReloading = true; s.reloadTimer = d.reloadTime * ((window.CHARACTER_STATS && window.CHARACTER_STATS.reloadMult) || 1); s.shotsFired = 0;
           if (SOUND) { SOUND.reloadMagOut(); setTimeout(() => SOUND && SOUND.reloadMagIn(), 400); }
         }
       } else {
@@ -6471,7 +6576,7 @@ window.LoadoutAPI = null;
     constructor(player, weapons, mines) {
       this.player = player; this.weapons = weapons; this.mines = mines;
       this.lastKills = 0; this.cash = 0; this.levels = {};
-      this.load(); applyUpgradeLevels(this.levels, this.mines);
+      this.load(); applyUpgradeLevels(this.levels, this.mines); applyCharacterUpgrades(this.levels, this.player);
     }
     load() {
       try { this.cash = Math.max(0, Number(localStorage.getItem(ECONOMY_STORAGE_KEY)) || 0); } catch {}
@@ -6492,6 +6597,7 @@ window.LoadoutAPI = null;
       if (this.cash < cost) return false;
       this.cash -= cost; this.levels[def.key] = level + 1;
       applyUpgradeLevels(this.levels, this.mines);
+      applyCharacterUpgrades(this.levels, this.player);
       this.weapons.applyWeapon(); this.weapons.buildGun();
       this.save();
       return true;
@@ -6593,6 +6699,7 @@ window.LoadoutAPI = null;
       }
       // Re-apply persisted shop upgrades now that the registry is populated.
       applyUpgradeLevels(this.economy.levels);
+      applyCharacterUpgrades(this.economy.levels, this.economy.player);
       this.weapons.applyWeapon();
       this.render();
     }
@@ -6655,6 +6762,7 @@ window.LoadoutAPI = null;
       this.economy.levels[upgDef.key] = level + 1;
       this.economy.save();
       applyUpgradeLevels(this.economy.levels);
+      applyCharacterUpgrades(this.economy.levels, this.economy.player);
       this.weapons.applyWeapon();
       this.weapons.buildGun();
       this.render();
@@ -6673,13 +6781,15 @@ window.LoadoutAPI = null;
       this.economy.levels[key] = lvl + 1;
       this.economy.save();
       applyUpgradeLevels(this.economy.levels);
+      applyCharacterUpgrades(this.economy.levels, this.economy.player);
       this.weapons.applyWeapon();
       this.weapons.buildGun();
       this.render();
     }
     render() {
-      if (this.activeTab === 'shop')   { this._renderShop(); return; }
-      if (this.activeTab === 'tuning') { this._renderTuning(); return; }
+      if (this.activeTab === 'shop')      { this._renderShop(); return; }
+      if (this.activeTab === 'tuning')    { this._renderTuning(); return; }
+      if (this.activeTab === 'character') { this._renderCharacter(); return; }
       this._renderUpgrades();
     }
     _renderTabs() {
@@ -6691,9 +6801,10 @@ window.LoadoutAPI = null;
       }
       tabs.innerHTML = '';
       const tabDefs = [
-        {id:'upgrades',label:'UPGRADES'},
-        {id:'shop',    label:'WEAPON SHOP'},
-        {id:'tuning',  label:'TUNING LAB'}
+        {id:'upgrades', label:'UPGRADES'},
+        {id:'shop',     label:'WEAPON SHOP'},
+        {id:'tuning',   label:'TUNING LAB'},
+        {id:'character',label:'CHARACTER'}
       ];
       for (const t of tabDefs) {
         const btn = document.createElement('button');
@@ -6866,6 +6977,107 @@ window.LoadoutAPI = null;
       this.el.cash.innerHTML = `<small>Cash Banked</small>$${Math.floor(this.economy.cash)}`;
       this.el.note.textContent = 'Filter by slot · BUY to unlock · EQUIP to slot it · ⚙ TUNE for fine % adjustments';
     }
+    // ---- Live DPS / TTK preview helpers (factor in tuning + char resistance) ----
+    _computeDpsPreview(weaponId) {
+      const w = WEAPONS[weaponId];
+      const base = BASE_WEAPONS[weaponId] || w;
+      const cs = window.CHARACTER_STATS || { resistance: 0 };
+      const targetHp = 100; // canonical 100 HP enemy
+      const headMul = w.headshotMult || 2;
+      const dmgPerHitBody = w.damage * (w.pellets || 1) * (1 - (cs.resistance || 0));
+      const dmgPerHitHead = w.damage * (w.pellets || 1) * headMul * (1 - (cs.resistance || 0));
+      const baseDmgBody = base.damage * (base.pellets || 1);
+      const baseDmgHead = base.damage * (base.pellets || 1) * (base.headshotMult || 2);
+      const fr = w.fireRate || 1; // shots per second
+      const baseFr = base.fireRate || 1;
+      const dpsBody = dmgPerHitBody * fr;
+      const dpsHead = dmgPerHitHead * fr;
+      const dpsBodyBase = baseDmgBody * baseFr;
+      const dpsHeadBase = baseDmgHead * baseFr;
+      const shotsBody = Math.max(1, Math.ceil(targetHp / Math.max(1, dmgPerHitBody)));
+      const shotsHead = Math.max(1, Math.ceil(targetHp / Math.max(1, dmgPerHitHead)));
+      // TTK = (shots-1) intervals between shots (assume first shot is instant).
+      const ttkBody = ((shotsBody - 1) / fr).toFixed(2);
+      const ttkHead = ((shotsHead - 1) / fr).toFixed(2);
+      return {
+        dpsBody: Math.round(dpsBody),
+        dpsHead: Math.round(dpsHead),
+        dpsBodyBase: Math.round(dpsBodyBase),
+        dpsHeadBase: Math.round(dpsHeadBase),
+        ttkBody, ttkHead, shotsBody, shotsHead
+      };
+    }
+    // ---- Character upgrades: capped, $2500 base, +$1500 per level ----
+    _charCost(level) { return 2500 + level * 1500; }
+    _buyChar(def) {
+      const lvl = this.economy.getLevel(def.key);
+      if (lvl >= def.maxLevel) return;
+      const cost = this._charCost(lvl);
+      if (this.economy.cash < cost) return;
+      this.economy.cash -= cost;
+      this.economy.levels[def.key] = lvl + 1;
+      this.economy.save();
+      applyUpgradeLevels(this.economy.levels);
+      applyCharacterUpgrades(this.economy.levels, this.economy.player);
+      this.weapons.applyWeapon();
+      this.weapons.buildGun();
+      this.render();
+    }
+    _renderCharacter() {
+      this._renderTabs();
+      this._clearSubTabs();
+      this.el.grid.innerHTML = '';
+      // Header card with current totals so the player sees impact instantly.
+      const cs = window.CHARACTER_STATS || {};
+      const header = document.createElement('div');
+      header.className = 'upgrade-card';
+      header.style.gridColumn = '1 / -1';
+      header.innerHTML = `
+        <h3>Character Stats</h3>
+        <p>Permanent personal upgrades. Each costs $2500 base and +$1500 per level. Every stat has a hard cap to keep matches fair.</p>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px;font-size:11px">
+          <div style="background:rgba(127,170,255,.10);border:1px solid rgba(127,170,255,.30);border-radius:8px;padding:8px;text-align:center">
+            <div style="color:#9ca7c2;text-transform:uppercase;letter-spacing:1px;font-size:10px">Speed</div>
+            <div style="color:#7faaff;font-weight:800;font-size:18px">×${(cs.speedMult || 1).toFixed(2)}</div>
+          </div>
+          <div style="background:rgba(180,255,180,.10);border:1px solid rgba(180,255,180,.30);border-radius:8px;padding:8px;text-align:center">
+            <div style="color:#9ca7c2;text-transform:uppercase;letter-spacing:1px;font-size:10px">Max HP</div>
+            <div style="color:#b5f5b5;font-weight:800;font-size:18px">${this.economy.player.state.maxHealth}</div>
+          </div>
+          <div style="background:rgba(255,140,140,.10);border:1px solid rgba(255,140,140,.30);border-radius:8px;padding:8px;text-align:center">
+            <div style="color:#9ca7c2;text-transform:uppercase;letter-spacing:1px;font-size:10px">Resistance</div>
+            <div style="color:#ff9b9b;font-weight:800;font-size:18px">${Math.round((cs.resistance || 0)*100)}%</div>
+          </div>
+          <div style="background:rgba(255,211,77,.10);border:1px solid rgba(255,211,77,.30);border-radius:8px;padding:8px;text-align:center">
+            <div style="color:#9ca7c2;text-transform:uppercase;letter-spacing:1px;font-size:10px">Ricochet</div>
+            <div style="color:#ffe08a;font-weight:800;font-size:18px">${Math.round((cs.ricochet || 0)*100)}%</div>
+          </div>
+        </div>`;
+      this.el.grid.appendChild(header);
+      for (const def of CHARACTER_UPGRADE_DEFS) {
+        const lvl = this.economy.getLevel(def.key);
+        const maxed = lvl >= def.maxLevel;
+        const cost = this._charCost(lvl);
+        const card = document.createElement('div');
+        card.className = 'upgrade-card';
+        card.innerHTML = `
+          <h3>${def.label}</h3>
+          <p>${def.desc}</p>
+          <div class="upgrade-meta">
+            <span class="upgrade-level">${lvl}/${def.maxLevel} · ${def.fmt(lvl)}</span>
+            <span>${maxed ? 'MAXED' : '$' + cost}</span>
+          </div>`;
+        const btn = document.createElement('button');
+        btn.className = 'upgrade-buy';
+        btn.textContent = maxed ? 'Maxed' : ('+1 · $' + cost);
+        btn.disabled = maxed || this.economy.cash < cost;
+        btn.addEventListener('click', () => this._buyChar(def));
+        card.appendChild(btn);
+        this.el.grid.appendChild(card);
+      }
+      this.el.cash.innerHTML = `<small>Cash Banked</small>$${Math.floor(this.economy.cash)}`;
+      this.el.note.textContent = 'Character upgrades · all stats hard-capped · saved locally';
+    }
     // === Tuning Lab: per-gun, per-stat fine 1% upgrades at $2500 base ===
     _renderTuning() {
       this._renderTabs();
@@ -6922,13 +7134,36 @@ window.LoadoutAPI = null;
         {stat:'range',      label:'Range',      fmt: v => v + 'm'},
         {stat:'spread',     label:'Accuracy',   fmt: v => '±' + (v*100).toFixed(2) + '°'},
       ];
-      // Header card
+      // Header card with live DPS / TTK preview (recomputes from current WEAPONS[wid])
       const header = document.createElement('div');
       header.className = 'upgrade-card';
       header.style.gridColumn = '1 / -1';
+      const preview = this._computeDpsPreview(wid);
       header.innerHTML = `
         <h3>${w.name} <span class="tier-badge tier-${w.tier || 1}" style="margin-left:6px">${(w.tier ? 'T'+w.tier : 'T1')}</span></h3>
-        <p>Fine-tune each stat by +1% per level. Each level costs $2500 base, +$1500 per additional level. Stacks with all other upgrades.</p>`;
+        <p>Fine-tune each stat by +1% per level. Each level costs $2500 base, +$1500 per additional level. Stacks with all other upgrades.</p>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px;font-size:11px">
+          <div style="background:rgba(127,170,255,.10);border:1px solid rgba(127,170,255,.30);border-radius:8px;padding:8px;text-align:center">
+            <div style="color:#9ca7c2;text-transform:uppercase;letter-spacing:1px;font-size:10px">Body DPS</div>
+            <div style="color:#7faaff;font-weight:800;font-size:18px">${preview.dpsBody}</div>
+            <div style="color:#6c7891;font-size:10px">base ${preview.dpsBodyBase}</div>
+          </div>
+          <div style="background:rgba(255,140,140,.10);border:1px solid rgba(255,140,140,.30);border-radius:8px;padding:8px;text-align:center">
+            <div style="color:#9ca7c2;text-transform:uppercase;letter-spacing:1px;font-size:10px">Head DPS</div>
+            <div style="color:#ff9b9b;font-weight:800;font-size:18px">${preview.dpsHead}</div>
+            <div style="color:#6c7891;font-size:10px">base ${preview.dpsHeadBase}</div>
+          </div>
+          <div style="background:rgba(255,211,77,.10);border:1px solid rgba(255,211,77,.30);border-radius:8px;padding:8px;text-align:center">
+            <div style="color:#9ca7c2;text-transform:uppercase;letter-spacing:1px;font-size:10px">TTK Body</div>
+            <div style="color:#ffe08a;font-weight:800;font-size:18px">${preview.ttkBody}s</div>
+            <div style="color:#6c7891;font-size:10px">${preview.shotsBody} shots</div>
+          </div>
+          <div style="background:rgba(180,255,180,.10);border:1px solid rgba(180,255,180,.30);border-radius:8px;padding:8px;text-align:center">
+            <div style="color:#9ca7c2;text-transform:uppercase;letter-spacing:1px;font-size:10px">TTK Head</div>
+            <div style="color:#b5f5b5;font-weight:800;font-size:18px">${preview.ttkHead}s</div>
+            <div style="color:#6c7891;font-size:10px">${preview.shotsHead} shots</div>
+          </div>
+        </div>`;
       this.el.grid.appendChild(header);
       for (const s of stats) {
         const key = this._tuneKey(wid, s.stat);
