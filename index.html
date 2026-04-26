@@ -1353,17 +1353,21 @@ const LADDER_DESCEND_SPEED = 5.5;
 // Tuned so the head genuinely pokes ~1 body-width around a wall without the
 // camera clipping into geometry. Lean collision-probes a ray from body
 // center outward and clamps the offset before any wall is hit.
-const LEAN_MAX_OFFSET    = 0.85;   // horizontal camera shift at full lean (m)
-const LEAN_MAX_ROLL      = 0.18;   // radians of camera roll at full lean
-const LEAN_MAX_BODY_TILT = 0.22;   // radians of forward pivot from hips
-const LEAN_HEAD_DROP     = 0.14;   // head drops as you lean (arc around shoulder)
-const LEAN_HEAD_IN       = 14.0;   // head lerp speed toward lean target (fast — head leads)
-const LEAN_HEAD_OUT      = 18.0;   // head returns even quicker
-const LEAN_SMOOTH_IN     = 5.0;    // body lerp speed toward lean target (slower — body follows)
-const LEAN_SMOOTH_OUT    = 8.5;    // body returns slightly faster than it moves out
-const LEAN_WEAPON_ROLL   = 0.28;   // gun cants with lean (radians)
-const LEAN_WEAPON_OFFSET = 0.09;   // gun also shifts with lean (m)
-const LEAN_PROBE_PADDING = 0.22;   // keep this far from walls
+// Tuned for Rainbow Six Siege-style "look around the corner" peeking:
+// the head displaces much further sideways than a typical CS-style lean,
+// the camera rolls more, and the body tilts more so the silhouette
+// genuinely clears the cover.
+const LEAN_MAX_OFFSET    = 1.55;   // horizontal camera shift at full lean (m)
+const LEAN_MAX_ROLL      = 0.34;   // radians of camera roll at full lean
+const LEAN_MAX_BODY_TILT = 0.42;   // radians of forward pivot from hips
+const LEAN_HEAD_DROP     = 0.22;   // head drops as you lean (arc around shoulder)
+const LEAN_HEAD_IN       = 16.0;   // head lerp speed toward lean target (fast — head leads)
+const LEAN_HEAD_OUT      = 20.0;   // head returns even quicker
+const LEAN_SMOOTH_IN     = 5.5;    // body lerp speed toward lean target (slower — body follows)
+const LEAN_SMOOTH_OUT    = 9.0;    // body returns slightly faster than it moves out
+const LEAN_WEAPON_ROLL   = 0.36;   // gun cants with lean (radians)
+const LEAN_WEAPON_OFFSET = 0.18;   // gun also shifts with lean (m)
+const LEAN_PROBE_PADDING = 0.18;   // keep this far from walls
 
 // ---------- SPAWN POINTS ----------
 const SPAWN_POINTS = [
@@ -2107,6 +2111,20 @@ class MapBuilder {
     this.createBox(WX*2 + T*2, H, T, 0, H/2,  WZ, wallMat);
     this.createBox(T, H, WZ*2 + T*2, -WX, H/2, 0, wallMat);
     this.createBox(T, H, WZ*2 + T*2,  WX, H/2, 0, wallMat);
+    // ---- WALL LIP (anti-roof-camp) ----
+    // A continuous inward-facing overhang along the top of every boundary wall
+    // so players can't reach (or stand on) the top of the perimeter wall.
+    // Lip extends inward, sits just below the wall top, and is collidable.
+    const LIP_DEPTH = 1.6;        // how far inward it juts (m)
+    const LIP_THICK = 0.4;        // vertical thickness
+    const LIP_TOP_DROP = 0.2;     // how far below the wall top
+    const lipY = H - LIP_TOP_DROP - LIP_THICK / 2;
+    // North / South lips (run along X)
+    this.createBox(WX*2 + T*2, LIP_THICK, LIP_DEPTH, 0, lipY, -WZ + (T/2 + LIP_DEPTH/2), wallMat);
+    this.createBox(WX*2 + T*2, LIP_THICK, LIP_DEPTH, 0, lipY,  WZ - (T/2 + LIP_DEPTH/2), wallMat);
+    // East / West lips (run along Z)
+    this.createBox(LIP_DEPTH, LIP_THICK, WZ*2 + T*2, -WX + (T/2 + LIP_DEPTH/2), lipY, 0, wallMat);
+    this.createBox(LIP_DEPTH, LIP_THICK, WZ*2 + T*2,  WX - (T/2 + LIP_DEPTH/2), lipY, 0, wallMat);
     // Central plaza
     this.createBox(22, 1.2, 22, 0, 0.6, 0, accentMat);
     const tH = 8;
@@ -4542,28 +4560,117 @@ class WeaponSystem {
       this.muzzleFlash = null; this.muzzleLight = null;
       return;
     }
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.06*s, 0.06*s, 0.50*s), new THREE.MeshStandardMaterial({ color: d.color, roughness: 0.4, metalness: 0.8 }));
-    this.viewModel.add(body);
-    const barrelLen = id === 'sniper' ? 0.4 * s : (id === 'shotgun' ? 0.34 * s : 0.3 * s);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.012*s, 0.015*s, barrelLen, 8), new THREE.MeshStandardMaterial({ color: 0x2e2e2e, roughness: 0.3, metalness: 0.9 }));
-    barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.01*s, -0.38*s); this.viewModel.add(barrel);
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04*s, 0.12*s, 0.05*s), new THREE.MeshStandardMaterial({ color: 0x1f1f1f, roughness: 0.8 }));
-    mag.position.set(0, -0.08*s, -0.10*s); this.viewModel.add(mag);
+    // ---- DETAILED VIEWMODEL ----
+    // Materials reused across parts
+    const matBody    = new THREE.MeshStandardMaterial({ color: d.color, roughness: 0.42, metalness: 0.78 });
+    const matMetal   = new THREE.MeshStandardMaterial({ color: 0x1d2128, roughness: 0.32, metalness: 0.92 });
+    const matPolymer = new THREE.MeshStandardMaterial({ color: 0x15181d, roughness: 0.85, metalness: 0.05 });
+    const matWood    = new THREE.MeshStandardMaterial({ color: 0x4a311a, roughness: 0.78, metalness: 0.05 });
+    const matAccent  = new THREE.MeshStandardMaterial({ color: 0x2c333d, roughness: 0.55, metalness: 0.6  });
+    const matGlass   = new THREE.MeshStandardMaterial({ color: 0x7fc6ff, roughness: 0.05, metalness: 0.1, emissive: 0x113355, emissiveIntensity: 0.4, transparent: true, opacity: 0.65 });
+    const matRubber  = new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.95, metalness: 0.0  });
+    // Receiver / upper
+    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.072*s, 0.082*s, 0.36*s), matBody);
+    receiver.position.set(0, 0.005*s, -0.06*s); this.viewModel.add(receiver);
+    // Lower receiver / mag well
+    const lower = new THREE.Mesh(new THREE.BoxGeometry(0.07*s, 0.05*s, 0.16*s), matAccent);
+    lower.position.set(0, -0.05*s, -0.08*s); this.viewModel.add(lower);
+    // Top picatinny rail with rib detail
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.022*s, 0.012*s, 0.34*s), matMetal);
+    rail.position.set(0, 0.052*s, -0.06*s); this.viewModel.add(rail);
+    for (let i = 0; i < 6; i++) {
+      const slot = new THREE.Mesh(new THREE.BoxGeometry(0.024*s, 0.004*s, 0.014*s), matPolymer);
+      slot.position.set(0, 0.058*s, -0.20*s + i * 0.05*s); this.viewModel.add(slot);
+    }
+    // Charging handle / bolt
+    const bolt = new THREE.Mesh(new THREE.BoxGeometry(0.018*s, 0.024*s, 0.05*s), matMetal);
+    bolt.position.set(0.044*s, 0.018*s, 0.04*s); this.viewModel.add(bolt);
+    // Ejection port (subtle inset)
+    const ejector = new THREE.Mesh(new THREE.BoxGeometry(0.005*s, 0.022*s, 0.06*s), matPolymer);
+    ejector.position.set(0.038*s, 0.015*s, -0.05*s); this.viewModel.add(ejector);
+    // Trigger group
+    const triggerGuard = new THREE.Mesh(new THREE.TorusGeometry(0.025*s, 0.005*s, 6, 12, Math.PI), matAccent);
+    triggerGuard.rotation.x = Math.PI/2; triggerGuard.position.set(0, -0.034*s, 0.02*s); this.viewModel.add(triggerGuard);
+    const trigger = new THREE.Mesh(new THREE.BoxGeometry(0.008*s, 0.020*s, 0.008*s), matMetal);
+    trigger.position.set(0, -0.028*s, 0.02*s); this.viewModel.add(trigger);
+    // Pistol grip
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04*s, 0.10*s, 0.05*s), matPolymer);
+    grip.position.set(0, -0.07*s, 0.06*s); grip.rotation.x = 0.18; this.viewModel.add(grip);
+    // Barrel + flash hider
+    const barrelLen = id === 'sniper' ? 0.46*s : (id === 'shotgun' ? 0.38*s : 0.34*s);
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.013*s, 0.016*s, barrelLen, 12), matMetal);
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position.set(0, 0.012*s, -0.06*s - barrelLen/2); this.viewModel.add(barrel);
+    const flashHider = new THREE.Mesh(new THREE.CylinderGeometry(0.022*s, 0.020*s, 0.04*s, 10), matMetal);
+    flashHider.rotation.x = Math.PI / 2;
+    flashHider.position.set(0, 0.012*s, -0.06*s - barrelLen - 0.02*s); this.viewModel.add(flashHider);
+    // Heat shield / handguard with vent slats
+    const handguard = new THREE.Mesh(new THREE.BoxGeometry(0.058*s, 0.044*s, 0.20*s), matAccent);
+    handguard.position.set(0, 0.005*s, -0.30*s); this.viewModel.add(handguard);
+    for (let i = 0; i < 4; i++) {
+      const vent = new THREE.Mesh(new THREE.BoxGeometry(0.06*s, 0.006*s, 0.012*s), matPolymer);
+      vent.position.set(0, 0.024*s, -0.36*s + i * 0.04*s); this.viewModel.add(vent);
+    }
+    // Magazine — curved profile (two stacked boxes for a banana-mag look on rifles/SMGs)
+    const magMat = matPolymer;
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04*s, 0.13*s, 0.06*s), magMat);
+    mag.position.set(0, -0.10*s, -0.10*s); this.viewModel.add(mag);
+    if (id === 'assault_rifle' || id === 'smg' || id === 'lmg') {
+      const magCurve = new THREE.Mesh(new THREE.BoxGeometry(0.04*s, 0.05*s, 0.05*s), magMat);
+      magCurve.position.set(0, -0.16*s, -0.07*s); magCurve.rotation.x = -0.35; this.viewModel.add(magCurve);
+    }
+    // Front iron sight post
+    const frontSight = new THREE.Mesh(new THREE.BoxGeometry(0.008*s, 0.024*s, 0.012*s), matMetal);
+    frontSight.position.set(0, 0.038*s, -0.06*s - barrelLen + 0.04*s); this.viewModel.add(frontSight);
+    // Rear iron sight aperture
+    const rearSight = new THREE.Mesh(new THREE.BoxGeometry(0.022*s, 0.018*s, 0.010*s), matMetal);
+    rearSight.position.set(0, 0.060*s, 0.10*s); this.viewModel.add(rearSight);
     if (id === 'lmg') {
-      const belt = new THREE.Mesh(new THREE.BoxGeometry(0.09*s, 0.14*s, 0.10*s), new THREE.MeshStandardMaterial({ color: 0x33482b, roughness: 0.8 }));
-      belt.position.set(0, -0.09*s, -0.08*s); this.viewModel.add(belt);
+      const belt = new THREE.Mesh(new THREE.BoxGeometry(0.10*s, 0.16*s, 0.12*s), new THREE.MeshStandardMaterial({ color: 0x33482b, roughness: 0.8 }));
+      belt.position.set(0, -0.10*s, -0.08*s); this.viewModel.add(belt);
+      const bipod1 = new THREE.Mesh(new THREE.CylinderGeometry(0.005*s, 0.005*s, 0.08*s, 6), matMetal);
+      bipod1.position.set(-0.025*s, -0.02*s, -0.34*s); bipod1.rotation.z = 0.4; this.viewModel.add(bipod1);
+      const bipod2 = bipod1.clone(); bipod2.position.x = 0.025*s; bipod2.rotation.z = -0.4; this.viewModel.add(bipod2);
     }
     if (id !== 'smg' && id !== 'pistol') {
-      const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05*s, 0.05*s, 0.18*s), new THREE.MeshStandardMaterial({ color: 0x363636, roughness: 0.7 }));
-      stock.position.set(0, -0.01*s, 0.32*s); this.viewModel.add(stock);
+      const stock = new THREE.Mesh(new THREE.BoxGeometry(0.05*s, 0.06*s, 0.20*s), matPolymer);
+      stock.position.set(0, -0.005*s, 0.30*s); this.viewModel.add(stock);
+      const stockPad = new THREE.Mesh(new THREE.BoxGeometry(0.058*s, 0.078*s, 0.020*s), matRubber);
+      stockPad.position.set(0, -0.005*s, 0.41*s); this.viewModel.add(stockPad);
+      const cheekRest = new THREE.Mesh(new THREE.BoxGeometry(0.04*s, 0.018*s, 0.12*s), matPolymer);
+      cheekRest.position.set(0, 0.030*s, 0.30*s); this.viewModel.add(cheekRest);
     }
     if (id === 'sniper' || id === 'dmr') {
-      const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.02*s, 0.02*s, 0.14*s, 8), new THREE.MeshStandardMaterial({ color: 0x121212, roughness: 0.3, metalness: 0.8 }));
-      scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.06*s, -0.15*s); this.viewModel.add(scope);
+      const scopeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.024*s, 0.024*s, 0.20*s, 14), matMetal);
+      scopeBody.rotation.x = Math.PI / 2; scopeBody.position.set(0, 0.078*s, -0.12*s); this.viewModel.add(scopeBody);
+      const scopeBell = new THREE.Mesh(new THREE.CylinderGeometry(0.034*s, 0.030*s, 0.05*s, 14), matMetal);
+      scopeBell.rotation.x = Math.PI / 2; scopeBell.position.set(0, 0.078*s, -0.24*s); this.viewModel.add(scopeBell);
+      const scopeLens = new THREE.Mesh(new THREE.CylinderGeometry(0.026*s, 0.026*s, 0.005*s, 14), matGlass);
+      scopeLens.rotation.x = Math.PI / 2; scopeLens.position.set(0, 0.078*s, -0.265*s); this.viewModel.add(scopeLens);
+      const turret = new THREE.Mesh(new THREE.CylinderGeometry(0.012*s, 0.012*s, 0.022*s, 10), matMetal);
+      turret.position.set(0, 0.10*s, -0.12*s); this.viewModel.add(turret);
+      const turret2 = turret.clone(); turret2.position.set(0.022*s, 0.078*s, -0.12*s); turret2.rotation.z = Math.PI/2; this.viewModel.add(turret2);
+    } else {
+      // Compact red-dot for non-snipers
+      const dotBase = new THREE.Mesh(new THREE.BoxGeometry(0.038*s, 0.018*s, 0.06*s), matMetal);
+      dotBase.position.set(0, 0.072*s, -0.06*s); this.viewModel.add(dotBase);
+      const dotLens = new THREE.Mesh(new THREE.PlaneGeometry(0.026*s, 0.022*s), matGlass);
+      dotLens.position.set(0, 0.082*s, -0.034*s); dotLens.rotation.x = -0.2; this.viewModel.add(dotLens);
+      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0035*s, 8), new THREE.MeshBasicMaterial({ color: 0xff2030 }));
+      dot.position.set(0, 0.082*s, -0.033*s); this.viewModel.add(dot);
     }
     if (id === 'shotgun') {
-      const pump = new THREE.Mesh(new THREE.BoxGeometry(0.08*s, 0.04*s, 0.12*s), new THREE.MeshStandardMaterial({ color: 0x2a1f18, roughness: 0.85 }));
-      pump.position.set(0, -0.04*s, -0.20*s); this.viewModel.add(pump);
+      const pump = new THREE.Mesh(new THREE.BoxGeometry(0.09*s, 0.05*s, 0.14*s), matWood);
+      pump.position.set(0, -0.045*s, -0.22*s); this.viewModel.add(pump);
+      const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.014*s, 0.014*s, 0.32*s, 10), matMetal);
+      tube.rotation.x = Math.PI / 2; tube.position.set(0, -0.012*s, -0.22*s); this.viewModel.add(tube);
+    }
+    if (id === 'pistol') {
+      // Slide serrations
+      for (let i = 0; i < 5; i++) {
+        const ser = new THREE.Mesh(new THREE.BoxGeometry(0.075*s, 0.005*s, 0.005*s), matPolymer);
+        ser.position.set(0, 0.035*s, 0.04*s + i * 0.012*s); this.viewModel.add(ser);
+      }
     }
     // Muzzle flash + point light (better glow)
     const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.18),
@@ -4790,10 +4897,19 @@ class WeaponSystem {
     s.ammo--;
     s.fireCooldown = 1 / d.fireRate;
     const pattern = d.recoil[s.shotsFired % d.recoil.length];
-    this.recoilYaw += pattern[0];
-    this.recoilPitch += pattern[1];
-    this.player.state.yaw += pattern[0];
-    this.player.state.pitch += pattern[1];
+    // Recoil should kick the muzzle UP. Pitch convention here is "+ = look up",
+    // but the authored patterns store the vertical kick as a negative number,
+    // so negate it to actually raise the aim.
+    const recYaw   =  pattern[0];
+    const recPitch = -pattern[1];
+    this.recoilYaw   += recYaw;
+    this.recoilPitch += recPitch;
+    this.player.state.yaw   += recYaw;
+    this.player.state.pitch += recPitch;
+    // Clamp so heavy auto-fire can't fling the camera past straight-up.
+    const _MP = this.player.MAX_PITCH || 1.55;
+    if (this.player.state.pitch >  _MP) this.player.state.pitch =  _MP;
+    if (this.player.state.pitch < -_MP) this.player.state.pitch = -_MP;
     s.shotsFired++;
     // Enhanced visual recoil
     const kickScale = (d.isMedpack ? 0 : (d.damage >= 80 ? 2.4 : (d.damage >= 50 ? 1.7 : (d.damage >= 25 ? 1.25 : 1.0))));
@@ -5389,6 +5505,27 @@ class GrenadeSystem {
           }
         }
       }
+      // Sync: only the thrower applies damage to remote players in their fire.
+      // Tick a sendHit roughly every 250ms so we don't flood the wire.
+      if (!f.fromRemote && this.network && this.network.connected) {
+        f._netT = (f._netT || 0) + dt;
+        if (f._netT >= 0.25) {
+          const tickDmg = MOLOTOV_DPS * f._netT;
+          f._netT = 0;
+          this.network.remotePlayers.forEach((rp, id) => {
+            if (!rp || id === this.network.localId) return;
+            const dx = (rp.px || 0) - f.x, dz = (rp.pz || 0) - f.z;
+            if (Math.hypot(dx, dz) < MOLOTOV_FIRE_RADIUS && Math.abs((rp.py || 0) - f.y) < 3) {
+              try {
+                this.network.sendHit({
+                  targetId: id, damage: tickDmg, headshot: false,
+                  weaponId: 'molotov', zone: 'torso', explosive: true
+                });
+              } catch (e) {}
+            }
+          });
+        }
+      }
       if (f.t >= f.life) {
         this.scene.remove(f.mesh);
         if (f.light) this.scene.remove(f.light);
@@ -5465,6 +5602,37 @@ class GrenadeSystem {
       }
     }
   }
+  // Send hit packets to every remote player inside an explosion radius so
+  // grenades / mines / molotovs actually damage other players over the
+  // network. Uses sendHit() with a synthetic weaponId so the host applies
+  // the damage and broadcasts it back to the victim.
+  // weaponId: 'grenade' | 'mine' | 'molotov' | 'rocket'
+  applyExplosionToRemotes(pos, radius, maxDamage, weaponId) {
+    if (!this.network || !this.network.connected) return;
+    const it = this.network.remotePlayers;
+    if (!it || !it.forEach) return;
+    it.forEach((rp, id) => {
+      if (!rp || id === this.network.localId) return;
+      // Approximate remote player center (head ~+1.6 from feet).
+      const rx = rp.px || 0, ry = (rp.py || 0) + 1.0, rz = rp.pz || 0;
+      const dx = pos.x - rx, dy = pos.y - ry, dz = pos.z - rz;
+      const d = Math.hypot(dx, dy, dz);
+      if (d >= radius) return;
+      const falloff = 1 - d / radius;
+      const dmg = maxDamage * falloff * falloff;
+      if (dmg <= 0) return;
+      try {
+        this.network.sendHit({
+          targetId: id,
+          damage: dmg,
+          headshot: false,
+          weaponId: weaponId || 'grenade',
+          zone: 'torso',
+          explosive: true
+        });
+      } catch (e) {}
+    });
+  }
   explode(g) {
     const pos = g.mesh.position.clone();
     if (SOUND) { SOUND.explosion(); SOUND.explosionAt(pos); }
@@ -5495,6 +5663,8 @@ class GrenadeSystem {
         }
       }
     }
+    // Sync: damage remote players in the blast.
+    this.applyExplosionToRemotes(pos, GRENADE_RADIUS, GRENADE_MAX_DAMAGE, 'grenade');
     this.scene.remove(g.mesh);
   }
   update(dt) {
@@ -7358,6 +7528,24 @@ window.LoadoutAPI = null;
           }
         }
         if (SOUND && SOUND.gunshotAt) { try { SOUND.gunshotAt({ x: cx, y: cy, z: cz }, 'shotgun'); } catch {} }
+        // Sync: damage remote players in the blast radius (only the mine's owner reports it).
+        if (this.network && this.network.connected && mine.ownerId === (this.network.localId || 'local')) {
+          this.network.remotePlayers.forEach((rp, id) => {
+            if (!rp || id === this.network.localId) return;
+            const rx = rp.px || 0, ry = (rp.py || 0) + 1.0, rz = rp.pz || 0;
+            const dd = Math.hypot(rx - cx, ry - cy, rz - cz);
+            if (dd >= this.RADIUS) return;
+            const fall = 1 - dd / this.RADIUS;
+            const dmg = this.DAMAGE * fall;
+            if (dmg <= 0) return;
+            try {
+              this.network.sendHit({
+                targetId: id, damage: dmg, headshot: false,
+                weaponId: 'mine', zone: 'torso', explosive: true
+              });
+            } catch (e) {}
+          });
+        }
       }
     }
     update(dt) {
@@ -7380,6 +7568,16 @@ window.LoadoutAPI = null;
               const bd = Math.hypot(bot.px - m.x, bot.pz - m.z);
               if (bd < 0.9) { this._removeMine(m, true); break; }
             }
+          }
+          // Remote players can also step on the owner's mine (only the owner detonates so it isn't double-counted).
+          if (this.network && this.network.remotePlayers && m.ownerId === (this.network.localId || 'local')) {
+            let triggeredByRemote = false;
+            this.network.remotePlayers.forEach((rp) => {
+              if (triggeredByRemote || !rp) return;
+              const rd = Math.hypot((rp.px || 0) - m.x, (rp.pz || 0) - m.z);
+              if (rd < 0.9) triggeredByRemote = true;
+            });
+            if (triggeredByRemote) { this._removeMine(m, true); continue; }
           }
         }
       }
@@ -7533,7 +7731,10 @@ window.LoadoutAPI = null;
   engine.registerSystem(hud);
   engine.registerSystem(mines);
   engine.registerSystem(killstreaks);
-  engine.registerSystem({ update() { economy.update(); if (upgradeMenu.isOpen) upgradeMenu.render(); } });
+  // Render the upgrade menu only when its state actually changes — re-rendering
+  // every frame destroys/recreates DOM nodes and silently wipes click handlers,
+  // which is why the shop buttons appeared unresponsive.
+  engine.registerSystem({ update() { economy.update(); } });
   engine.registerSystem({ update(dt) { bloodFX.update(dt); } });
   engine.registerSystem({ update(dt) { tracers.update(dt); } });
   // ADS Scope system - manages scope overlays and FOV zoom
