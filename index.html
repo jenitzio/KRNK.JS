@@ -1388,6 +1388,12 @@ html, body {
       </select>
     </label>
   </div>
+  <div class="settings-group">
+    <label>Mine fuse timer (auto-detonate after placement) <input type="checkbox" id="setting-mine-fuse"></label>
+    <label>Fuse length <span class="val" id="setting-mine-fuse-val">5.0s</span></label>
+    <input type="range" id="setting-mine-fuse-seconds" min="1" max="30" step="0.5" value="5">
+    <label>Throw trajectory preview (hold G / F to aim) <input type="checkbox" id="setting-throw-preview" checked></label>
+  </div>
   <button id="setting-reset">Reset Defaults</button>
 </div>
 <script type="importmap">
@@ -1517,7 +1523,10 @@ class SettingsManager {
       volume: 0.7,
       invertQE: false,
       leanQRight: false,
-      leanERight: true
+      leanERight: true,
+      mineFuseEnabled: false,
+      mineFuseSeconds: 5,
+      throwPreviewEnabled: true
     };
     this.data = { ...this.defaults };
     this.listeners = new Map();
@@ -1964,8 +1973,9 @@ class InputManager {
       this.mouseRight = false;
     });
   }
-  isKeyDown(code)    { return this.keysDown.has(code); }
-  isKeyPressed(code) { return this.keysPressed.has(code); }
+  isKeyDown(code)     { return this.keysDown.has(code); }
+  isKeyPressed(code)  { return this.keysPressed.has(code); }
+  isKeyReleased(code) { return this.keysReleased && this.keysReleased.has(code); }
   isMouseLeftPressed() { return this.mouseLeftPressed; }
   requestPointerLock() {
     if (!this.isLocked && this.canvas.requestPointerLock) {
@@ -5687,39 +5697,65 @@ class WeaponSystem {
     this.targetOffset.x += this.kickPos.x;
     this.targetOffset.y += this.kickPos.y;
     this.targetOffset.z += this.kickPos.z;
-    // ---- THROW POSE (grenade / molotov) ----
-    // Drives a clear over-the-shoulder wind-up followed by a forward release.
-    // Uses two half-curves: 0..0.45 = wind-up (pull arm back & up), 0.45..1 = release (slam forward & down).
-    let _throwSlerp = 0; // smoothing factor toward throw rotation (so we override sway/lean)
+    // ---- THROW POSE (grenade / molotov) with wrist/elbow IK ----
+    // Three-stage motion driven by throwAnimT:
+    //   0.00..0.45  WIND-UP  : elbow lifts, wrist cocks back, weapon pulls over shoulder
+    //   0.45..0.65  RELEASE  : explosive forward snap; wrist whips, elbow extends
+    //   0.65..1.00  FOLLOW   : arm overshoots forward-down, settles with damped wobble
+    // Molotovs are heavier (slower, deeper wind-up); grenades snap faster.
+    let _throwSlerp = 0;
     try {
       const G = window.__GRENADES__;
       if (G && G.throwAnimT > 0 && G.throwAnimDur > 0) {
-        const tNorm = 1 - (G.throwAnimT / G.throwAnimDur); // 0 -> 1 over animation
-        _throwSlerp = Math.min(1, Math.sin(tNorm * Math.PI) * 1.4); // ease in/out
-        let dx, dy, dz, rotX, rotZ;
-        if (tNorm < 0.45) {
-          // Wind-up: pull weapon back over shoulder, tilt arm up
-          const u = tNorm / 0.45;
-          const e = u * u * (3 - 2 * u); // smoothstep
-          dx =  0.18 * e;            // arm pulls to the right (right-handed)
-          dy =  0.22 * e;            // raises up to shoulder
-          dz =  0.30 * e;            // pulls back toward camera
-          rotX = -1.05 * e;          // wrist cocks up
-          rotZ =  0.55 * e;          // tilts inward
+        const tNorm = 1 - (G.throwAnimT / G.throwAnimDur);
+        const isMolo = G.throwAnimKind === 'molotov';
+        // Heavier object => deeper pull-back, slightly slower release start
+        const massMul = isMolo ? 1.18 : 1.0;
+        const releaseStart = isMolo ? 0.50 : 0.45;
+        const followStart  = isMolo ? 0.70 : 0.65;
+        _throwSlerp = Math.min(1, Math.sin(tNorm * Math.PI) * 1.45);
+        let dx = 0, dy = 0, dz = 0;
+        let rotX = 0, rotY = 0, rotZ = 0;
+        if (tNorm < releaseStart) {
+          // WIND-UP — elbow lifts (dy up), wrist cocks back (rotX neg), shoulder rolls in (rotZ pos)
+          const u = tNorm / releaseStart;
+          const e = u * u * (3 - 2 * u);              // smoothstep
+          const wristCock = Math.sin(u * Math.PI * 0.5); // 0->1, faster wrist than shoulder
+          dx =  0.20 * e * massMul;                   // pulls right (right-handed)
+          dy =  0.26 * e * massMul;                   // elbow rises to shoulder
+          dz =  0.34 * e * massMul;                   // pulls back toward camera
+          rotX = -1.15 * wristCock * massMul;         // WRIST cocks up (independent of shoulder)
+          rotY =  0.22 * e;                           // slight inward yaw (elbow forward of wrist)
+          rotZ =  0.60 * e;                           // weapon tilts inward (forearm rotation)
+        } else if (tNorm < followStart) {
+          // RELEASE — explosive forward whip
+          const u = (tNorm - releaseStart) / (followStart - releaseStart);
+          const eOut = 1 - Math.pow(1 - u, 4);        // very fast ease-out (snap)
+          const wristWhip = Math.sin(u * Math.PI);     // wrist accelerates then decelerates
+          // Lerp from wind-up apex to release apex
+          dx =  (0.20 - 0.36 * eOut) * massMul;       // crosses centerline, ends slightly left
+          dy =  (0.26 - 0.50 * eOut) * massMul;       // arm slams down past rest
+          dz =  (0.34 - 0.62 * eOut) * massMul;       // punches forward past rest
+          rotX = -1.15 + (1.95 * eOut) - 0.25 * wristWhip; // wrist whips forward & slightly down
+          rotY =  0.22 - 0.45 * eOut;                  // yaw flips outward as wrist releases
+          rotZ =  0.60 - 0.95 * eOut;                  // forearm pronates (counter-twist)
         } else {
-          // Release + follow-through: snap forward and down
-          const u = (tNorm - 0.45) / 0.55;
-          const e = 1 - Math.pow(1 - u, 3); // ease-out cubic, fast release
-          dx =  0.18 * (1 - e) - 0.10 * e;
-          dy =  0.22 * (1 - e) - 0.18 * e;  // overshoots downward on follow-through
-          dz =  0.30 * (1 - e) - 0.22 * e;  // punches forward past rest
-          rotX = -1.05 * (1 - e) + 0.65 * e;
-          rotZ =  0.55 * (1 - e) - 0.18 * e;
+          // FOLLOW-THROUGH — damped wobble back to rest
+          const u = (tNorm - followStart) / (1 - followStart);
+          const damp = Math.pow(1 - u, 2);
+          const wobble = Math.sin(u * Math.PI * 3.2) * damp; // secondary motion
+          dx =  -0.16 * damp + 0.012 * wobble;
+          dy =  -0.24 * damp + 0.010 * wobble;
+          dz =  -0.28 * damp;
+          rotX =  0.80 * damp - 0.18 * wobble;          // wrist relaxes, slight bounce
+          rotY = -0.23 * damp + 0.05 * wobble;
+          rotZ = -0.35 * damp + 0.08 * wobble;
         }
         this.targetOffset.x += dx;
         this.targetOffset.y += dy;
         this.targetOffset.z += dz;
         this.kickRot.x += rotX;
+        this.kickRot.y += rotY;
         this.kickRot.z += rotZ;
       }
     } catch {}
@@ -6024,10 +6060,10 @@ class DestructionManager {
 }
 
 class GrenadeSystem {
-  constructor(scene, map, player, network, bots, input, weapons, destruction) {
+  constructor(scene, map, player, network, bots, input, weapons, destruction, settings) {
     this.scene = scene; this.map = map; this.player = player;
     this.network = network; this.bots = bots; this.input = input;
-    this.weapons = weapons; this.destruction = destruction;
+    this.weapons = weapons; this.destruction = destruction; this.settings = settings;
     this.count = GRENADE_MAX; this.cooldown = 0; this.active = [];
     // Throw animation timer (shared between grenades & molotovs). Drives a
     // dedicated wind-up + release pose on the weapon viewmodel.
@@ -6059,6 +6095,30 @@ class GrenadeSystem {
         this._spawnRemoteMolotov(d);
       });
     }
+    // ---- Throw trajectory preview (rotates with arm because origin is camera-anchored) ----
+    // Line is built in WORLD space; we rebuild geometry every frame the player is aiming.
+    this.PREVIEW_MAX_POINTS = 64;
+    this._previewPositions = new Float32Array(this.PREVIEW_MAX_POINTS * 3);
+    const pgeo = new THREE.BufferGeometry();
+    pgeo.setAttribute('position', new THREE.BufferAttribute(this._previewPositions, 3));
+    pgeo.setDrawRange(0, 0);
+    this._previewLineMatGrenade = new THREE.LineDashedMaterial({ color: 0x6cd06c, dashSize: 0.18, gapSize: 0.10, transparent: true, opacity: 0.95, depthTest: true });
+    this._previewLineMatMolotov = new THREE.LineDashedMaterial({ color: 0xff8a3a, dashSize: 0.18, gapSize: 0.10, transparent: true, opacity: 0.95, depthTest: true });
+    this.previewLine = new THREE.Line(pgeo, this._previewLineMatGrenade);
+    this.previewLine.frustumCulled = false; this.previewLine.visible = false;
+    this.previewLine.renderOrder = 999;
+    this.scene.add(this.previewLine);
+    const mgeo = new THREE.RingGeometry(0.18, 0.26, 18); mgeo.rotateX(-Math.PI / 2);
+    this._previewMarkerMat = new THREE.MeshBasicMaterial({ color: 0x6cd06c, transparent: true, opacity: 0.85, depthTest: true, side: THREE.DoubleSide });
+    this.previewMarker = new THREE.Mesh(mgeo, this._previewMarkerMat);
+    this.previewMarker.frustumCulled = false; this.previewMarker.visible = false; this.previewMarker.renderOrder = 999;
+    this.scene.add(this.previewMarker);
+    // Aim state: which throwable the player is currently winding up (null = none).
+    this._aimingKind = null;     // 'grenade' | 'molotov' | null
+    this._aimHoldT = 0;          // how long the key has been held this aim
+    // Reused vectors to keep update() allocation-free
+    this._tmpPos = new THREE.Vector3();
+    this._tmpVel = new THREE.Vector3();
   }
   reset() {
     this.count = GRENADE_MAX;
@@ -6069,11 +6129,176 @@ class GrenadeSystem {
     for (const f of this.fires) this.scene.remove(f.mesh);
     this.activeMolotovs.length = 0; this.remoteMolotovs.length = 0; this.fires.length = 0;
   }
+
+  // ===== Throw trajectory preview =====
+  // Returns the world-space spawn origin for a throw of the given kind.
+  // Anchors to the camera/eye exactly like the real throw spawn, then offsets
+  // by the viewmodel's current local position so the arc origin pivots WITH
+  // the arm animation (wind-up pulls back, release punches forward).
+  _getThrowOrigin(out) {
+    const ps = this.player.state;
+    const fx = -Math.sin(ps.yaw) * Math.cos(ps.pitch);
+    const fy =  Math.sin(ps.pitch) + 0.25;
+    const fz = -Math.cos(ps.yaw) * Math.cos(ps.pitch);
+    const len = Math.hypot(fx, fy, fz) || 1;
+    const eyeY = ps.position.y - PLAYER_HEIGHT + this.player.eyeHeight;
+    out.set(
+      ps.position.x + (fx / len) * 0.4,
+      eyeY,
+      ps.position.z + (fz / len) * 0.4
+    );
+    // Add the viewmodel offset transformed into world space — this is what
+    // makes the preview origin physically follow the arm during wind-up.
+    if (this.weapons && this.weapons.viewModel) {
+      const off = this.weapons.viewModel.position; // camera-local
+      // Camera basis: right = (cos(yaw), 0, -sin(yaw)); up ≈ (0,1,0); forward = (-sin(yaw), 0, -cos(yaw))
+      const cy = Math.cos(ps.yaw), sy = Math.sin(ps.yaw);
+      const rx =  cy, rz = -sy;
+      const fwx = -sy, fwz = -cy;
+      // Scale arm offset for visibility (viewmodel is small relative to world).
+      const k = 0.55;
+      out.x += (rx * off.x + fwx * (-off.z)) * k;
+      out.y += off.y * k;
+      out.z += (rz * off.x + fwz * (-off.z)) * k;
+    }
+    return out;
+  }
+
+  _getThrowVelocity(kind, out) {
+    const ps = this.player.state;
+    const fx = -Math.sin(ps.yaw) * Math.cos(ps.pitch);
+    const fy =  Math.sin(ps.pitch) + 0.25;
+    const fz = -Math.cos(ps.yaw) * Math.cos(ps.pitch);
+    const len = Math.hypot(fx, fy, fz) || 1;
+    const speed = (kind === 'molotov') ? MOLOTOV_THROW_SPEED : GRENADE_THROW_SPEED;
+    out.set(
+      (fx / len) * speed       + ps.velocity.x * 0.4,
+      (fy / len) * speed * 0.7 + ps.velocity.y * 0.4,
+      (fz / len) * speed       + ps.velocity.z * 0.4
+    );
+    return out;
+  }
+
+  // Simulate up to MAX seconds of physics and write samples into _previewPositions.
+  // Stops early on collision; returns { count, hit, hitPos }.
+  _simulateArc(originVec, velVec) {
+    const positions = this._previewPositions;
+    const MAX_T = 2.2;          // simulate max 2.2 s
+    const STEP = 0.05;          // 50 ms steps → 44 samples max, plenty smooth
+    const SAMPLE_EVERY = 1;
+    const r = GRENADE_SIZE;
+    const meshes = this.map ? this.map.bulletTargetMeshes : null;
+    // Reuse the existing AABB cache from _collide if present, otherwise build local.
+    let boxes = this._collideBoxes;
+    if (meshes && (!boxes || boxes.length !== meshes.length)) {
+      this._collideBoxes = new Array(meshes.length);
+      for (let i = 0; i < meshes.length; i++) this._collideBoxes[i] = new THREE.Box3();
+      boxes = this._collideBoxes;
+    }
+    if (meshes) for (let i = 0; i < meshes.length; i++) boxes[i].setFromObject(meshes[i]);
+
+    let px = originVec.x, py = originVec.y, pz = originVec.z;
+    let vx = velVec.x,    vy = velVec.y,    vz = velVec.z;
+    let count = 0;
+    let hit = false;
+    positions[0] = px; positions[1] = py; positions[2] = pz;
+    count = 1;
+    let stepIdx = 0;
+    const steps = Math.floor(MAX_T / STEP);
+    for (let s = 0; s < steps && count < this.PREVIEW_MAX_POINTS; s++) {
+      vy += GRENADE_GRAVITY * STEP;
+      const nx = px + vx * STEP;
+      const ny = py + vy * STEP;
+      const nz = pz + vz * STEP;
+      // Floor collision (matches engine ground at y=0)
+      if (ny < 0.05) {
+        const t = (py - 0.05) / (py - ny || 1e-6);
+        const ix = px + (nx - px) * t;
+        const iz = pz + (nz - pz) * t;
+        positions[count*3] = ix; positions[count*3+1] = 0.05; positions[count*3+2] = iz;
+        count++;
+        hit = true; px = ix; py = 0.05; pz = iz;
+        break;
+      }
+      // World AABB collision (match _collide axis-by-axis)
+      let blocked = false;
+      if (meshes) {
+        for (let i = 0; i < meshes.length; i++) {
+          const b = boxes[i];
+          if (nx + r > b.min.x && nx - r < b.max.x &&
+              ny + r > b.min.y && ny - r < b.max.y &&
+              nz + r > b.min.z && nz - r < b.max.z) {
+            blocked = true;
+            // Stop sample at near-contact point
+            positions[count*3] = nx; positions[count*3+1] = ny; positions[count*3+2] = nz;
+            count++;
+            hit = true; px = nx; py = ny; pz = nz;
+            break;
+          }
+        }
+      }
+      if (blocked) break;
+      px = nx; py = ny; pz = nz;
+      stepIdx++;
+      if (stepIdx % SAMPLE_EVERY === 0) {
+        positions[count*3] = px; positions[count*3+1] = py; positions[count*3+2] = pz;
+        count++;
+      }
+    }
+    return { count, hit, hitX: px, hitY: py, hitZ: pz };
+  }
+
+  _updatePreview() {
+    const wantPreview = !!(this.settings && this.settings.get && this.settings.get('throwPreviewEnabled'));
+    if (!wantPreview || !this._aimingKind || this.player.state.isDead) {
+      if (this.previewLine) this.previewLine.visible = false;
+      if (this.previewMarker) this.previewMarker.visible = false;
+      return;
+    }
+    const kind = this._aimingKind;
+    // Hide if no stock or on cooldown for the chosen throwable.
+    const noStock = (kind === 'grenade')
+      ? (this.count <= 0 || this.cooldown > 0)
+      : (this.molotovCount <= 0 || this.molotovCooldown > 0);
+    if (noStock) {
+      this.previewLine.visible = false;
+      this.previewMarker.visible = false;
+      return;
+    }
+    this._getThrowOrigin(this._tmpPos);
+    this._getThrowVelocity(kind, this._tmpVel);
+    const r = this._simulateArc(this._tmpPos, this._tmpVel);
+    const geo = this.previewLine.geometry;
+    geo.attributes.position.needsUpdate = true;
+    geo.setDrawRange(0, r.count);
+    geo.computeBoundingSphere();
+    // Pick material by kind
+    const mat = (kind === 'molotov') ? this._previewLineMatMolotov : this._previewLineMatGrenade;
+    if (this.previewLine.material !== mat) this.previewLine.material = mat;
+    this.previewLine.computeLineDistances();
+    this.previewLine.visible = r.count >= 2;
+    // Marker at the impact point (only if we hit something).
+    if (r.hit) {
+      this._previewMarkerMat.color.set(kind === 'molotov' ? 0xff8a3a : 0x6cd06c);
+      this.previewMarker.position.set(r.hitX, r.hitY + 0.02, r.hitZ);
+      // Pulse subtly so the marker reads as "live"
+      const t = (performance.now() % 1000) / 1000;
+      const s = 1 + Math.sin(t * Math.PI * 2) * 0.12;
+      this.previewMarker.scale.setScalar(s);
+      this.previewMarker.visible = true;
+    } else {
+      this.previewMarker.visible = false;
+    }
+  }
+
   throwMolotov() {
     if (this.molotovCount <= 0 || this.molotovCooldown > 0) return;
     if (this.player.state.isDead) return;
     this.molotovCount--; this.molotovCooldown = MOLOTOV_THROW_COOLDOWN;
     this.throwAnimT = this.throwAnimDur; this.throwAnimKind = 'molotov';
+    this._aimingKind = null; this._aimHoldT = 0;
+    if (this.previewLine) this.previewLine.visible = false;
+    if (this.previewMarker) this.previewMarker.visible = false;
     if (SOUND) SOUND.grenadeThrow();
     const ps = this.player.state;
     const fx = -Math.sin(ps.yaw) * Math.cos(ps.pitch);
@@ -6191,6 +6416,9 @@ class GrenadeSystem {
     if (this.player.state.isDead) return;
     this.count--; this.cooldown = GRENADE_THROW_COOLDOWN;
     this.throwAnimT = this.throwAnimDur; this.throwAnimKind = 'grenade';
+    this._aimingKind = null; this._aimHoldT = 0;
+    if (this.previewLine) this.previewLine.visible = false;
+    if (this.previewMarker) this.previewMarker.visible = false;
     if (SOUND) { SOUND.grenadePin(); SOUND.grenadeThrow(); }
     const ps = this.player.state;
     const fx = -Math.sin(ps.yaw) * Math.cos(ps.pitch);
@@ -6335,8 +6563,22 @@ class GrenadeSystem {
     }
     if (this._wasDead && !this.player.state.isDead) { this.count = GRENADE_MAX; this.molotovCount = MOLOTOV_MAX; }
     this._wasDead = this.player.state.isDead;
-    if (this.input.isKeyPressed('KeyG')) this.throwGrenade();
-    if (this.input.isKeyPressed('KeyF')) this.throwMolotov();
+    // ---- Throw input: aim-while-held + throw-on-release ----
+    // Quick taps (press+release in the same frame) still throw immediately,
+    // matching the original feel. Longer holds show a live trajectory preview
+    // (via _updatePreview below) and fire when the key is released.
+    const gDown = this.input.isKeyDown('KeyG');
+    const fDown = this.input.isKeyDown('KeyF');
+    if (gDown && this.count > 0 && this.cooldown <= 0) {
+      this._aimingKind = 'grenade'; this._aimHoldT += dt;
+    } else if (fDown && this.molotovCount > 0 && this.molotovCooldown <= 0) {
+      this._aimingKind = 'molotov'; this._aimHoldT += dt;
+    } else {
+      this._aimingKind = null; this._aimHoldT = 0;
+    }
+    if (this.input.isKeyReleased('KeyG')) this.throwGrenade();
+    if (this.input.isKeyReleased('KeyF')) this.throwMolotov();
+    this._updatePreview();
     this._stepBottle(this.activeMolotovs, dt, false);
     this._stepBottle(this.remoteMolotovs, dt, true);
     this._stepFires(dt);
@@ -7483,6 +7725,10 @@ class SettingsPanelController {
       invertQE: document.getElementById('setting-invert-qe'),
       qLean: document.getElementById('setting-q-lean'),
       eLean: document.getElementById('setting-e-lean'),
+      mineFuse: document.getElementById('setting-mine-fuse'),
+      mineFuseSeconds: document.getElementById('setting-mine-fuse-seconds'),
+      mineFuseSecondsVal: document.getElementById('setting-mine-fuse-val'),
+      throwPreview: document.getElementById('setting-throw-preview'),
       reset: document.getElementById('setting-reset')
     };
     this.sync(); this.bind();
@@ -7503,6 +7749,13 @@ class SettingsPanelController {
     if (this.el.invertQE) this.el.invertQE.checked = this.settings.get('invertQE');
     if (this.el.qLean) this.el.qLean.value = this.settings.get('leanQRight') ? 'right' : 'left';
     if (this.el.eLean) this.el.eLean.value = this.settings.get('leanERight') ? 'right' : 'left';
+    if (this.el.mineFuse) this.el.mineFuse.checked = this.settings.get('mineFuseEnabled');
+    if (this.el.mineFuseSeconds) {
+      const s = this.settings.get('mineFuseSeconds');
+      this.el.mineFuseSeconds.value = s;
+      if (this.el.mineFuseSecondsVal) this.el.mineFuseSecondsVal.textContent = s.toFixed(1) + 's';
+    }
+    if (this.el.throwPreview) this.el.throwPreview.checked = this.settings.get('throwPreviewEnabled');
   }
   bind() {
     this.el.resolution.addEventListener('input', e => {
@@ -7528,8 +7781,14 @@ class SettingsPanelController {
       this.el.volumeVal.textContent = Math.round(v * 100) + '%';
     });
     if (this.el.invertQE) this.el.invertQE.addEventListener('change', e => this.settings.set('invertQE', e.target.checked));
+    if (this.el.throwPreview) this.el.throwPreview.addEventListener('change', e => this.settings.set('throwPreviewEnabled', e.target.checked));
     if (this.el.qLean) this.el.qLean.addEventListener('change', e => this.settings.set('leanQRight', e.target.value === 'right'));
     if (this.el.eLean) this.el.eLean.addEventListener('change', e => this.settings.set('leanERight', e.target.value === 'right'));
+    if (this.el.mineFuse) this.el.mineFuse.addEventListener('change', e => this.settings.set('mineFuseEnabled', e.target.checked));
+    if (this.el.mineFuseSeconds) this.el.mineFuseSeconds.addEventListener('input', e => {
+      const v = parseFloat(e.target.value); this.settings.set('mineFuseSeconds', v);
+      if (this.el.mineFuseSecondsVal) this.el.mineFuseSecondsVal.textContent = v.toFixed(1) + 's';
+    });
     this.el.reset.addEventListener('click', () => {
       this.settings.resetAll();
       this.bots.enabled = this.settings.get('botsEnabled');
@@ -8013,7 +8272,7 @@ window.LoadoutAPI = null;
   skinManager.applyToViewModel(weapons.viewModel, weapons.state.currentWeaponId);
 
   const destruction = new DestructionManager(engine.scene, map);
-  const grenades = new GrenadeSystem(engine.scene, map, player, network, bots, input, weapons, destruction);
+  const grenades = new GrenadeSystem(engine.scene, map, player, network, bots, input, weapons, destruction, settings);
   const hud = new HUDManager(player, weapons, network, input, bots);
   hud.grenades = grenades;
   const dmgDir = new DamageDirectionSystem(document.getElementById('damage-direction'), player);
@@ -8765,8 +9024,8 @@ window.LoadoutAPI = null;
 
   // ---- MINES ----
   class MineSystem {
-    constructor(scene, map, player, network, bots) {
-      this.scene = scene; this.map = map; this.player = player; this.network = network; this.bots = bots;
+    constructor(scene, map, player, network, bots, settings) {
+      this.scene = scene; this.map = map; this.player = player; this.network = network; this.bots = bots; this.settings = settings;
       this.mines = [];
       this.MAX_STOCK = 4; this.stock = this.MAX_STOCK;
       this.cooldown = 0; this.PLACE_COOLDOWN = 0.5;
@@ -8891,7 +9150,22 @@ window.LoadoutAPI = null;
         if (m.exploded) { this.mines.splice(i, 1); continue; }
         m.life += dt;
         if (!m.armed && m.life >= this.ARM_TIME) { m.armed = true; m.mesh.material = this._matArmed; }
-        if (m.armed) { const s = 1 + Math.sin(m.life * 12) * 0.06; m.mesh.scale.setScalar(s); }
+        // Optional fuse: once armed, auto-detonate after `mineFuseSeconds`.
+        // Mine still explodes when shot (damageMine -> _removeMine(true)).
+        const fuseOn = !!(this.settings && this.settings.get && this.settings.get('mineFuseEnabled'));
+        const fuseLen = (this.settings && this.settings.get) ? (this.settings.get('mineFuseSeconds') || 5) : 5;
+        if (m.armed && fuseOn) {
+          const armedFor = m.life - this.ARM_TIME;
+          const remaining = fuseLen - armedFor;
+          if (remaining <= 0) { this._removeMine(m, true); continue; }
+          // Accelerating blink as fuse runs out (visual countdown).
+          const urgency = 1 - Math.max(0, Math.min(1, remaining / fuseLen)); // 0 -> 1
+          const blinkRate = 4 + urgency * 28;
+          const s = 1 + Math.sin(m.life * blinkRate) * (0.06 + urgency * 0.10);
+          m.mesh.scale.setScalar(s);
+        } else if (m.armed) {
+          const s = 1 + Math.sin(m.life * 12) * 0.06; m.mesh.scale.setScalar(s);
+        }
         if (m.armed) {
           const p = this.player.state.position;
           const dx = p.x - m.x, dz = p.z - m.z, dy = (p.y - PLAYER_HEIGHT) - m.y;
@@ -8916,7 +9190,7 @@ window.LoadoutAPI = null;
       }
     }
   }
-  const mines = new MineSystem(engine.scene, map, player, network, bots);
+  const mines = new MineSystem(engine.scene, map, player, network, bots, settings);
 
   // ---- KILLSTREAKS ----
   class KillstreakSystem {
