@@ -279,6 +279,74 @@ html, body {
   display: none;
 }
 #hud-taskbar .tb-slot.active .tb-mode { display: block; color: #ffd54f; border-color: rgba(255,213,79,.4); background: rgba(0,0,0,.6); }
+#hud-attachments {
+  position: absolute;
+  right: 14px;
+  bottom: 110px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  color: #cfd6e4;
+  background: rgba(8,10,16,.72);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 190px;
+  pointer-events: none;
+  display: none;
+  box-shadow: 0 6px 16px rgba(0,0,0,.4);
+  z-index: 5;
+}
+#hud-attachments .ha-title { color:#ffd54f; font-size:10px; letter-spacing:2px; margin-bottom:4px; opacity:.9; }
+#hud-attachments .ha-row { display:flex; justify-content:space-between; gap:10px; line-height:1.4; }
+#hud-attachments .ha-k { color:#8b95ad; }
+#hud-attachments .ha-v { color:#fff; font-variant-numeric: tabular-nums; }
+#hud-attachments .ha-v.good { color:#7ee787; }
+#hud-attachments .ha-v.bad  { color:#ff7b72; }
+#hud-attachments .ha-equip { color:#9ecbff; font-size:10px; margin-top:5px; opacity:.9; line-height:1.4; }
+#hud-attachments .ha-hint  { color:#666e80; font-size:9px; margin-top:5px; letter-spacing:1px; }
+/* === Attachment comparison panel (toggle with N) === */
+#hud-att-compare {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  color: #cfd6e4;
+  background: rgba(8,10,16,.92);
+  border: 1px solid rgba(255,213,79,.25);
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
+  pointer-events: none;
+  display: none;
+  box-shadow: 0 10px 30px rgba(0,0,0,.6);
+  z-index: 10;
+}
+#hud-att-compare h3 {
+  color:#ffd54f; font-size:12px; letter-spacing:2px; margin:0 0 4px 0; font-weight:700;
+}
+#hud-att-compare .acmp-sub { color:#8b95ad; font-size:10px; margin-bottom:10px; }
+#hud-att-compare .acmp-slot { margin-bottom:12px; }
+#hud-att-compare .acmp-slot-title {
+  color:#9ecbff; font-size:10px; letter-spacing:2px; margin-bottom:4px;
+  border-bottom:1px solid rgba(255,255,255,.08); padding-bottom:3px;
+}
+#hud-att-compare table { width:100%; border-collapse:collapse; font-size:10px; }
+#hud-att-compare th { color:#666e80; font-weight:600; text-align:right; padding:2px 4px; letter-spacing:1px; }
+#hud-att-compare th:first-child, #hud-att-compare td:first-child { text-align:left; }
+#hud-att-compare td { padding:2px 4px; font-variant-numeric: tabular-nums; }
+#hud-att-compare tr.acmp-current { background: rgba(255,213,79,.10); }
+#hud-att-compare tr.acmp-current td:first-child::before { content:'▸ '; color:#ffd54f; }
+#hud-att-compare .acmp-good { color:#7ee787; }
+#hud-att-compare .acmp-bad  { color:#ff7b72; }
+#hud-att-compare .acmp-neu  { color:#8b95ad; }
+#hud-att-compare .acmp-name { color:#fff; }
+#hud-att-compare .acmp-foot { color:#666e80; font-size:9px; margin-top:6px; letter-spacing:1px; }
 #fire-mode-toast {
   position: absolute;
   left: 50%;
@@ -1196,6 +1264,17 @@ html, body {
     <div id="medpack-bar-fill"></div>
   </div>
   <div id="hud-taskbar"></div>
+  <div id="hud-attachments">
+    <div class="ha-title">ATTACHMENTS</div>
+    <div class="ha-equip" id="ha-equip">—</div>
+    <div class="ha-row"><span class="ha-k">RECOIL</span><span class="ha-v" id="ha-recoil">—</span></div>
+    <div class="ha-row"><span class="ha-k">ACCURACY</span><span class="ha-v" id="ha-spread">—</span></div>
+    <div class="ha-row"><span class="ha-k">ADS SPEED</span><span class="ha-v" id="ha-ads">—</span></div>
+    <div class="ha-row"><span class="ha-k">DAMAGE</span><span class="ha-v" id="ha-dmg">—</span></div>
+    <div class="ha-row"><span class="ha-k">RANGE</span><span class="ha-v" id="ha-rng">—</span></div>
+    <div class="ha-hint">[ OPTIC  ] GRIP  \ MUZZLE  ·  N COMPARE</div>
+  </div>
+  <div id="hud-att-compare"></div>
   <div id="fire-mode-toast"></div>
   <!-- Game-mode HUD banner & objective prompt removed (single TDM session). -->
 
@@ -1249,6 +1328,7 @@ html, body {
     <kbd>G</kbd> Grenade · <kbd>F</kbd> Molotov · <kbd>O</kbd> Mine<br>
     <kbd>Q</kbd>/<kbd>E</kbd> Lean-peek · <kbd>C</kbd> Crouch / Slide ·
     <kbd>V</kbd> Camera ·
+    <kbd>[</kbd>/<kbd>]</kbd>/<kbd>\</kbd> Attachments · <kbd>N</kbd> Compare ·
     <kbd>Tab</kbd> Scoreboard · <kbd>Esc</kbd> Settings
   </div>
 </div>
@@ -3132,8 +3212,33 @@ class PlayerController {
     // Look
     const _adsMult = (window.__ADS_SCOPE__ && this.input.mouseRight) ? window.__ADS_SCOPE__.getAimSensitivityMult(engine.weapons ? engine.weapons.state.currentWeaponId : 'assault_rifle') : 1.0;
     const sens = this.input.mouseRight ? this.settings.get('aimSensitivity') * _adsMult : this.settings.get('sensitivity');
-    this.state.yaw   -= this.input.mouseDeltaX * sens;
-    this.state.pitch -= this.input.mouseDeltaY * sens * (this.settings.get('invertY') ? -1 : 1);
+    let _dyaw   = -this.input.mouseDeltaX * sens;
+    let _dpitch = -this.input.mouseDeltaY * sens * (this.settings.get('invertY') ? -1 : 1);
+    // Crosshair-offset recoil: the player must "pay down" any unresolved
+    // recoil offset before their input actually moves the camera. Pulling
+    // the mouse DOWN (negative dpitch) consumes positive aimOffsetPitch.
+    const w = engine && engine.weapons;
+    if (w) {
+      // Decay leftover offset over time when the trigger is released.
+      if (!this.input.mouseLeft) {
+        const decay = Math.min(1, 4 * dt);
+        w.aimOffsetYaw   = (w.aimOffsetYaw   || 0) * (1 - decay);
+        w.aimOffsetPitch = (w.aimOffsetPitch || 0) * (1 - decay);
+      }
+      // Consume offset with opposing mouse input.
+      if (w.aimOffsetPitch && Math.sign(_dpitch) !== Math.sign(w.aimOffsetPitch) && _dpitch !== 0) {
+        const consume = Math.min(Math.abs(_dpitch), Math.abs(w.aimOffsetPitch));
+        w.aimOffsetPitch -= Math.sign(w.aimOffsetPitch) * consume;
+        _dpitch -= Math.sign(_dpitch) * consume; // input absorbed compensating
+      }
+      if (w.aimOffsetYaw && Math.sign(_dyaw) !== Math.sign(w.aimOffsetYaw) && _dyaw !== 0) {
+        const consume = Math.min(Math.abs(_dyaw), Math.abs(w.aimOffsetYaw));
+        w.aimOffsetYaw -= Math.sign(w.aimOffsetYaw) * consume;
+        _dyaw -= Math.sign(_dyaw) * consume;
+      }
+    }
+    this.state.yaw   += _dyaw;
+    this.state.pitch += _dpitch;
     this.state.pitch = Math.max(-this.MAX_PITCH, Math.min(this.MAX_PITCH, this.state.pitch));
     // Sprint
     const movingFwd = this.input.isKeyDown('KeyW') || this.input.isKeyDown('ArrowUp');
@@ -3367,7 +3472,8 @@ class PlayerController {
       yaw: +s.yaw.toFixed(3), pitch: +s.pitch.toFixed(3),
       grounded: s.isGrounded, crouching: s.isCrouching,
       health: s.health, dead: s.isDead, kills: s.kills, deaths: s.deaths,
-      lean: +this.leanClamped.toFixed(2)
+      lean: +this.leanClamped.toFixed(2),
+      wid: s.currentWeaponId || 'assault_rifle'
     };
   }
 }
@@ -3392,6 +3498,10 @@ class BotManager {
     this.bots.length = 0;
     for (let i = 0; i < count; i++) {
       const sp = findSafeSpawn(this.map);
+      // Random visible loadout per bot — drives both behavior flavor and
+      // the remote-player hold pose (rifle / pistol / melee).
+      const _botWeapons = ['assault_rifle','smg','shotgun','sniper','dmr','lmg','pistol','melee'];
+      const _wid = _botWeapons[(Math.random() * _botWeapons.length) | 0];
       this.bots.push({
         id: 'bot_' + i, name: 'Bot ' + (i + 1),
         px: sp.x, py: PLAYER_HEIGHT, pz: sp.z,
@@ -3399,7 +3509,8 @@ class BotManager {
         grounded: false, crouching: false,
         health: 100, dead: false, kills: 0, deaths: 0,
         thinkTime: 0, shootTime: 0,
-        targetX: sp.x, targetZ: sp.z, lean: 0
+        targetX: sp.x, targetZ: sp.z, lean: 0,
+        wid: _wid
       });
     }
   }
@@ -3715,7 +3826,73 @@ class RemotePlayerManager {
     parent.add(m);
     return m;
   }
-  createPlayer(id, name) {
+  // Map a weapon id (or class) to one of three hold-pose archetypes.
+  _classifyWeapon(wid) {
+    if (!wid) return 'rifle';
+    const def = (typeof WEAPONS !== 'undefined') ? WEAPONS[wid] : null;
+    if (def && def.isMelee)   return 'melee';
+    if (def && def.isMedpack) return 'medpack';
+    if (wid === 'pistol' || wid === 'revolver' || wid === 'desert_eagle' || (def && def.category === 'pistol')) return 'pistol';
+    return 'rifle';
+  }
+  // Build a class-appropriate held weapon at the right hand. Returns the
+  // weapon group already parented under bodyPivot. The CALLER also poses
+  // the arms (because the arm angles depend on the class too).
+  _buildHeldWeapon(weaponClass, bodyPivot, id, shadows) {
+    const G = this._geo, M = this._mats;
+    const grp = new THREE.Group();
+    bodyPivot.add(grp);
+    if (weaponClass === 'melee') {
+      grp.position.set(0.30, 1.05, 0.30);
+      grp.rotation.set(-0.5, 0, -0.3);
+      // Knife: hilt + guard + blade
+      this._addPart(grp, new THREE.BoxGeometry(0.05, 0.16, 0.05), M.gunWood,  0, -0.10, 0, 0, shadows, id);
+      this._addPart(grp, new THREE.BoxGeometry(0.14, 0.03, 0.06), M.gunMetal, 0, -0.02, 0, 0, shadows, id);
+      this._addPart(grp, new THREE.BoxGeometry(0.04, 0.34, 0.02), M.gunMetal, 0,  0.18, 0, 0, shadows, id);
+    } else if (weaponClass === 'pistol') {
+      grp.position.set(0.22, 1.20, 0.40);
+      // Compact pistol: slide + frame + grip + sight
+      this._addPart(grp, new THREE.BoxGeometry(0.08, 0.10, 0.30), M.gunMetal, 0,  0.02, 0.02, 0, shadows, id);  // slide
+      this._addPart(grp, new THREE.BoxGeometry(0.08, 0.06, 0.22), M.gunMetal, 0, -0.05, 0,    0, shadows, id);  // frame
+      this._addPart(grp, new THREE.BoxGeometry(0.07, 0.16, 0.10), M.gunWood,  0, -0.16, -0.06, 0, shadows, id); // grip
+      this._addPart(grp, new THREE.BoxGeometry(0.03, 0.04, 0.04), M.gunMetal, 0,  0.10, -0.10, 0, shadows, id); // rear sight
+      this._addPart(grp, new THREE.BoxGeometry(0.025,0.03, 0.03), M.gunMetal, 0,  0.10,  0.13, 0, shadows, id); // front sight
+    } else if (weaponClass === 'medpack') {
+      grp.position.set(0.20, 1.10, 0.32);
+      this._addPart(grp, new THREE.BoxGeometry(0.22, 0.18, 0.10), M.vest, 0, 0, 0, 0, shadows, id);
+      this._addPart(grp, new THREE.BoxGeometry(0.18, 0.05, 0.11), new THREE.MeshStandardMaterial({ color: 0xd83a3a, roughness: 0.6 }), 0, 0, 0.001, 0, shadows, id);
+      this._addPart(grp, new THREE.BoxGeometry(0.04, 0.14, 0.11), new THREE.MeshStandardMaterial({ color: 0xd83a3a, roughness: 0.6 }), 0, 0, 0.001, 0, shadows, id);
+    } else {
+      // Rifle / SMG / shotgun / sniper / LMG — long-arm pose
+      grp.position.set(0.20, 1.22, 0.45);
+      this._addPart(grp, G.gunBody,  M.gunMetal,  0,  0,     0,    0, shadows, id);
+      this._addPart(grp, G.gunGrip,  M.gunWood,   0, -0.14,  0.08, 0, shadows, id);
+      this._addPart(grp, G.gunMag,   M.gunMetal,  0, -0.16, -0.04, 0, shadows, id);
+      this._addPart(grp, G.gunSight, M.gunMetal,  0,  0.10, -0.06, 0, shadows, id);
+      // Stock + barrel + foregrip for added detail
+      this._addPart(grp, new THREE.BoxGeometry(0.08, 0.10, 0.20), M.gunWood,  0, -0.02, -0.36, 0, shadows, id);  // stock
+      this._addPart(grp, new THREE.BoxGeometry(0.04, 0.04, 0.34), M.gunMetal, 0,  0.02,  0.42, 0, shadows, id);  // barrel
+      this._addPart(grp, new THREE.BoxGeometry(0.06, 0.10, 0.06), M.gunMetal, 0, -0.10,  0.20, 0, shadows, id);  // foregrip
+      this._addPart(grp, new THREE.BoxGeometry(0.08, 0.04, 0.40), M.gunMetal, 0,  0.08,  0.10, 0, shadows, id);  // rail
+    }
+    return grp;
+  }
+  _poseArms(weaponClass, rUpper, rFore, lUpper, lFore) {
+    if (weaponClass === 'melee') {
+      // Knife held low, ready stance
+      rUpper.rotation.x = -0.20; rFore.rotation.x = -0.55;
+      lUpper.rotation.x = -0.10; lFore.rotation.x = -0.30;
+    } else if (weaponClass === 'pistol' || weaponClass === 'medpack') {
+      // Pistol two-handed grip closer to chest
+      rUpper.rotation.x = -0.55; rFore.rotation.x = -0.95;
+      lUpper.rotation.x = -0.50; lFore.rotation.x = -0.95;
+    } else {
+      // Rifle: forward, supporting hand far out on the foregrip
+      rUpper.rotation.x = -0.40; rFore.rotation.x = -0.70;
+      lUpper.rotation.x = -0.55; lFore.rotation.x = -0.85;
+    }
+  }
+  createPlayer(id, name, wid) {
     const group = new THREE.Group();
     group._playerId = id;
     const shadows = this.settings.get('shadowsEnabled');
@@ -3737,45 +3914,67 @@ class RemotePlayerManager {
     this._addPart(bodyPivot, G.thigh, pantMat,    0.12, 0.66, 0, 0, shadows, id, 'leg');
     this._addPart(bodyPivot, G.shin,  pantMat,    0.12, 0.22, 0, 0, shadows, id, 'leg');
     this._addPart(bodyPivot, G.boot,  M.boot,     0.12, 0.06, 0.04, 0, shadows, id, 'leg');
+    // Knee pads (small dark plates at the knee joint)
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.20, 0.08, 0.04), M.vest, -0.12, 0.44, 0.10, 0, shadows, id, 'leg');
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.20, 0.08, 0.04), M.vest,  0.12, 0.44, 0.10, 0, shadows, id, 'leg');
+    // Thigh holster (pistol pouch on right thigh)
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.12, 0.18, 0.10), M.vest,  0.20, 0.66, 0.08, 0, shadows, id, 'leg');
     // === PELVIS / TORSO ===
     this._addPart(bodyPivot, G.pelvis, pantMat,   0,    0.98, 0, 0, shadows, id, 'torso');
     const torso   = this._addPart(bodyPivot, G.torso,  uniMat,   0, 1.36, 0, 0, shadows, id, 'torso');
     this._addPart(bodyPivot, G.abdomen, uniMat,    0,    1.10, 0, 0, shadows, id, 'torso');
+    // Belt
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.56, 0.06, 0.34), M.boot, 0, 0.94, 0, 0, shadows, id, 'torso');
     // Tactical vest (slightly in front of torso for depth) — armored: reduce damage
     this._addPart(bodyPivot, new THREE.BoxGeometry(0.50, 0.50, 0.06), M.vest, 0, 1.36, 0.18, 0, shadows, id, 'armor');
-    // Backpack
+    // Chest-rig magazine pouches (3 across the front)
+    for (let pi = -1; pi <= 1; pi++) {
+      this._addPart(bodyPivot, new THREE.BoxGeometry(0.13, 0.18, 0.05), M.vest, pi * 0.16, 1.28, 0.22, 0, shadows, id, 'armor');
+    }
+    // Shoulder pads
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.20, 0.08, 0.20), M.vest,  0.40, 1.62, 0, 0, shadows, id, 'armor');
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.20, 0.08, 0.20), M.vest, -0.40, 1.62, 0, 0, shadows, id, 'armor');
+    // Backpack + radio antenna
     this._addPart(bodyPivot, G.backpack, M.backpack, 0, 1.34, -0.22, 0, shadows, id, 'torso');
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.04, 0.22, 0.04), M.gunMetal, 0.16, 1.62, -0.30, 0, shadows, id, 'torso'); // antenna
+    // Knife sheath on left side of vest
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.05, 0.18, 0.04), M.boot, -0.22, 1.18, 0.22, 0, shadows, id, 'armor');
     // === ARMS ===
     // Right arm (gun side — slightly forward like aiming)
     this._addPart(bodyPivot, G.shoulder, uniMat,  0.36, 1.55, 0, 0, shadows, id, 'arm');
     const rUpper = this._addPart(bodyPivot, G.upperArm, uniMat,  0.36, 1.32, 0.06, 0, shadows, id, 'arm');
-    rUpper.rotation.x = -0.4;
     const rFore  = this._addPart(bodyPivot, G.forearm,  uniMat,  0.30, 1.06, 0.28, 0, shadows, id, 'arm');
-    rFore.rotation.x = -0.7;
     this._addPart(bodyPivot, G.hand, M.glove, 0.27, 0.94, 0.42, 0, shadows, id, 'arm');
+    // Elbow pad (right)
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.16, 0.06, 0.06), M.vest, 0.32, 1.18, 0.20, 0, shadows, id, 'arm');
     // Left arm — also forward, supporting the gun barrel
     this._addPart(bodyPivot, G.shoulder, uniMat, -0.36, 1.55, 0, 0, shadows, id, 'arm');
     const lUpper = this._addPart(bodyPivot, G.upperArm, uniMat, -0.36, 1.32, 0.06, 0, shadows, id, 'arm');
-    lUpper.rotation.x = -0.55;
     const lFore  = this._addPart(bodyPivot, G.forearm,  uniMat, -0.22, 1.04, 0.34, 0, shadows, id, 'arm');
-    lFore.rotation.x = -0.85;
     this._addPart(bodyPivot, G.hand, M.glove, -0.16, 0.92, 0.50, 0, shadows, id, 'arm');
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.16, 0.06, 0.06), M.vest, -0.30, 1.18, 0.22, 0, shadows, id, 'arm');
+    // Pose arms based on weapon class
+    const weaponClass = this._classifyWeapon(wid);
+    this._poseArms(weaponClass, rUpper, rFore, lUpper, lFore);
     // === NECK + HEAD ===
     this._addPart(bodyPivot, G.neck, M.skin, 0, 1.72, 0, 0, shadows, id, 'neck');
     const head = this._addPart(bodyPivot, G.head, M.skin, 0, 1.92, 0, 0, shadows, id, 'head');
     this._addPart(bodyPivot, G.jaw,  M.skin, 0, 1.78, 0.04, 0, shadows, id, 'head');
+    // Eyes (tiny dark pixels) for face detail
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.04, 0.03, 0.02), M.visor,  0.06, 1.95, 0.155, 0, shadows, id, 'head');
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.04, 0.03, 0.02), M.visor, -0.06, 1.95, 0.155, 0, shadows, id, 'head');
     // Helmet (head with armor)
     this._addPart(bodyPivot, G.helmet, helmMat, 0, 2.00, 0, 0, shadows, id, 'helmet');
+    // Helmet rails / NVG mount on the front of the helmet
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.18, 0.04, 0.04), M.gunMetal, 0, 2.06, 0.16, 0, shadows, id, 'helmet');
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.06, 0.06, 0.10), M.gunMetal, 0, 2.10, 0.20, 0, shadows, id, 'helmet'); // NVG arm
+    // Side rails
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.04, 0.04, 0.18), M.gunMetal,  0.20, 2.02, 0.04, 0, shadows, id, 'helmet');
+    this._addPart(bodyPivot, new THREE.BoxGeometry(0.04, 0.04, 0.18), M.gunMetal, -0.20, 2.02, 0.04, 0, shadows, id, 'helmet');
     // Visor (eye line — counts as headshot)
     this._addPart(bodyPivot, G.visor, M.visor, 0, 1.95, 0.16, 0, shadows, id, 'head');
-    // === GUN (held forward) ===
-    const gunGroup = new THREE.Group();
-    gunGroup.position.set(0.20, 1.20, 0.45);
-    bodyPivot.add(gunGroup);
-    this._addPart(gunGroup, G.gunBody, M.gunMetal, 0, 0, 0, 0, shadows, id);
-    this._addPart(gunGroup, G.gunGrip, M.gunWood,  0, -0.14, 0.08, 0, shadows, id);
-    this._addPart(gunGroup, G.gunMag,  M.gunMetal, 0, -0.16, -0.04, 0, shadows, id);
-    this._addPart(gunGroup, G.gunSight, M.gunMetal, 0, 0.10, -0.06, 0, shadows, id);
+    // === HELD WEAPON (class-specific) ===
+    const gunGroup = this._buildHeldWeapon(weaponClass, bodyPivot, id, shadows);
     // === Name + health sprites ===
     const { sprite: nameSprite, tex: nameTex } = this.createNameSprite(name);
     nameSprite.position.y = 2.30;
@@ -3786,6 +3985,8 @@ class RemotePlayerManager {
     this.scene.add(group);
     const entry = {
       group, bodyPivot, head, torso, gunGroup,
+      rUpper, rFore, lUpper, lFore,
+      shadows, _wid: wid || null, _weaponClass: weaponClass,
       nameSprite, nameTex,
       healthSprite: hb.sprite, healthCanvas: hb.canvas, healthCtx: hb.ctx, healthTex: hb.tex,
       smoothedLean: 0, _lastHealth: -1, _lastVisible: true
@@ -3827,7 +4028,25 @@ class RemotePlayerManager {
       // SESSION ISOLATION: don't render players from other game modes.
       if (!this.network.isSameMode(data)) continue;
       let entry = this.models.get(id);
-      if (!entry) entry = this.createPlayer(id, data.name || 'Player');
+      if (!entry) entry = this.createPlayer(id, data.name || 'Player', data.wid);
+      // Rebuild held weapon + arm pose if the remote swapped weapon class
+      const _newClass = this._classifyWeapon(data.wid);
+      if (entry._weaponClass !== _newClass) {
+        // Remove old gun group meshes from meshList & scene
+        if (entry.gunGroup) {
+          entry.gunGroup.traverse(o => {
+            if (o.isMesh) {
+              const i = this.meshList.indexOf(o);
+              if (i !== -1) this.meshList.splice(i, 1);
+            }
+          });
+          entry.bodyPivot.remove(entry.gunGroup);
+        }
+        entry.gunGroup = this._buildHeldWeapon(_newClass, entry.bodyPivot, id, entry.shadows);
+        this._poseArms(_newClass, entry.rUpper, entry.rFore, entry.lUpper, entry.lFore);
+        entry._weaponClass = _newClass;
+        entry._wid = data.wid;
+      }
       const wantVisible = !data.dead;
       if (entry._lastVisible !== wantVisible) {
         entry.group.visible = wantVisible;
@@ -3867,6 +4086,83 @@ class RemotePlayerManager {
 const ECONOMY_STORAGE_KEY = 'krnk_cash';
 const UPGRADE_STORAGE_KEY = 'krnk_upgrades';
 const KILL_REWARD = 125;
+// =====================================================================
+// ATTACHMENTS SYSTEM
+// Per-weapon attachments persisted across weapon swaps. Each weapon can
+// independently equip ONE optic, ONE muzzle device, and ONE underbarrel
+// grip. Cycling through hotkeys swaps the viewmodel parts AND the HUD
+// icon — no need to touch the shop. Defaults are 'iron'/'none'/'none'
+// so weapons look stock until the player chooses to attach something.
+// =====================================================================
+const ATTACHMENTS = {
+  optic:      ['iron', 'reddot', 'holo', 'acog', 'sniper'],
+  muzzle:     ['none', 'suppressor', 'compensator', 'flashhider'],
+  grip:       ['none', 'vertical', 'angled', 'stubby'],
+};
+// Per-attachment stat modifiers. Multipliers stack multiplicatively across
+// the three slots. recoilMult scales pattern + visual kick, spreadMult
+// scales hip+ADS spread, adsTimeMult scales ADS animation duration
+// (>1 = slower to aim), damageMult scales bullet damage, rangeMult scales
+// effective range before damage falloff.
+const ATTACHMENT_STATS = {
+  optic: {
+    iron:   { recoilMult: 1.00, spreadMult: 1.00, adsTimeMult: 1.00, damageMult: 1.00, rangeMult: 1.00 },
+    reddot: { recoilMult: 0.97, spreadMult: 0.92, adsTimeMult: 1.05, damageMult: 1.00, rangeMult: 1.05 },
+    holo:   { recoilMult: 0.96, spreadMult: 0.90, adsTimeMult: 1.08, damageMult: 1.00, rangeMult: 1.06 },
+    acog:   { recoilMult: 0.93, spreadMult: 0.82, adsTimeMult: 1.25, damageMult: 1.05, rangeMult: 1.20 },
+    sniper: { recoilMult: 0.90, spreadMult: 0.70, adsTimeMult: 1.45, damageMult: 1.10, rangeMult: 1.35 },
+  },
+  muzzle: {
+    none:        { recoilMult: 1.00, spreadMult: 1.00, adsTimeMult: 1.00, damageMult: 1.00, rangeMult: 1.00 },
+    suppressor:  { recoilMult: 0.85, spreadMult: 1.05, adsTimeMult: 1.10, damageMult: 0.92, rangeMult: 0.85 },
+    compensator: { recoilMult: 0.70, spreadMult: 0.95, adsTimeMult: 1.05, damageMult: 1.00, rangeMult: 1.00 },
+    flashhider:  { recoilMult: 0.92, spreadMult: 0.92, adsTimeMult: 1.02, damageMult: 1.00, rangeMult: 1.05 },
+  },
+  grip: {
+    none:     { recoilMult: 1.00, spreadMult: 1.00, adsTimeMult: 1.00, damageMult: 1.00, rangeMult: 1.00 },
+    vertical: { recoilMult: 0.78, spreadMult: 0.95, adsTimeMult: 1.08, damageMult: 1.00, rangeMult: 1.00 },
+    angled:   { recoilMult: 0.92, spreadMult: 0.92, adsTimeMult: 0.85, damageMult: 1.00, rangeMult: 1.00 },
+    stubby:   { recoilMult: 0.86, spreadMult: 0.88, adsTimeMult: 0.95, damageMult: 1.00, rangeMult: 0.95 },
+  },
+};
+const AttachmentsAPI = {
+  _store: {},
+  get(weaponId) {
+    if (!this._store[weaponId]) {
+      const isLong = weaponId === 'sniper' || weaponId === 'dmr';
+      this._store[weaponId] = {
+        optic:  isLong ? 'sniper' : 'iron',
+        muzzle: 'none',
+        grip:   'none',
+      };
+    }
+    return this._store[weaponId];
+  },
+  cycle(weaponId, slot) {
+    const list = ATTACHMENTS[slot]; if (!list) return null;
+    const a = this.get(weaponId);
+    const idx = list.indexOf(a[slot]);
+    a[slot] = list[(idx + 1) % list.length];
+    return a[slot];
+  },
+  // Multiply all per-slot modifier tables together.
+  getStats(weaponId) {
+    const a = this.get(weaponId);
+    const o = ATTACHMENT_STATS.optic[a.optic]   || ATTACHMENT_STATS.optic.iron;
+    const m = ATTACHMENT_STATS.muzzle[a.muzzle] || ATTACHMENT_STATS.muzzle.none;
+    const g = ATTACHMENT_STATS.grip[a.grip]     || ATTACHMENT_STATS.grip.none;
+    return {
+      recoilMult:  o.recoilMult  * m.recoilMult  * g.recoilMult,
+      spreadMult:  o.spreadMult  * m.spreadMult  * g.spreadMult,
+      adsTimeMult: o.adsTimeMult * m.adsTimeMult * g.adsTimeMult,
+      damageMult:  o.damageMult  * m.damageMult  * g.damageMult,
+      rangeMult:   o.rangeMult   * m.rangeMult   * g.rangeMult,
+    };
+  },
+};
+window.AttachmentsAPI = AttachmentsAPI;
+window.ATTACHMENT_STATS = ATTACHMENT_STATS;
+
 const WEAPONS = {
   assault_rifle: {
     name: 'AK-47', damage: 28, headshotMult: 2, fireRate: 10, automatic: true,
@@ -4640,25 +4936,60 @@ class WeaponSystem {
       const cheekRest = new THREE.Mesh(new THREE.BoxGeometry(0.04*s, 0.018*s, 0.12*s), matPolymer);
       cheekRest.position.set(0, 0.030*s, 0.30*s); this.viewModel.add(cheekRest);
     }
-    if (id === 'sniper' || id === 'dmr') {
-      const scopeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.024*s, 0.024*s, 0.20*s, 14), matMetal);
+    // ---- OPTIC (driven by AttachmentsAPI) ----
+    const _att = (window.AttachmentsAPI ? window.AttachmentsAPI.get(id) : { optic:'iron', muzzle:'none', grip:'none' });
+    const optic = _att.optic;
+    if (optic === 'sniper') {
+      const scopeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.024*s, 0.024*s, 0.20*s, 16), matMetal);
       scopeBody.rotation.x = Math.PI / 2; scopeBody.position.set(0, 0.078*s, -0.12*s); this.viewModel.add(scopeBody);
-      const scopeBell = new THREE.Mesh(new THREE.CylinderGeometry(0.034*s, 0.030*s, 0.05*s, 14), matMetal);
+      const scopeBell = new THREE.Mesh(new THREE.CylinderGeometry(0.034*s, 0.030*s, 0.05*s, 16), matMetal);
       scopeBell.rotation.x = Math.PI / 2; scopeBell.position.set(0, 0.078*s, -0.24*s); this.viewModel.add(scopeBell);
-      const scopeLens = new THREE.Mesh(new THREE.CylinderGeometry(0.026*s, 0.026*s, 0.005*s, 14), matGlass);
+      const scopeLens = new THREE.Mesh(new THREE.CylinderGeometry(0.026*s, 0.026*s, 0.005*s, 16), matGlass);
       scopeLens.rotation.x = Math.PI / 2; scopeLens.position.set(0, 0.078*s, -0.265*s); this.viewModel.add(scopeLens);
-      const turret = new THREE.Mesh(new THREE.CylinderGeometry(0.012*s, 0.012*s, 0.022*s, 10), matMetal);
+      const turret = new THREE.Mesh(new THREE.CylinderGeometry(0.012*s, 0.012*s, 0.022*s, 12), matMetal);
       turret.position.set(0, 0.10*s, -0.12*s); this.viewModel.add(turret);
       const turret2 = turret.clone(); turret2.position.set(0.022*s, 0.078*s, -0.12*s); turret2.rotation.z = Math.PI/2; this.viewModel.add(turret2);
-    } else {
-      // Compact red-dot for non-snipers
+      // Sun-shade ribs
+      for (let r = 0; r < 3; r++) {
+        const rib = new THREE.Mesh(new THREE.TorusGeometry(0.030*s, 0.0018*s, 6, 18), matPolymer);
+        rib.rotation.y = Math.PI/2;
+        rib.position.set(0, 0.078*s, -0.235*s + r*0.012*s); this.viewModel.add(rib);
+      }
+    } else if (optic === 'acog') {
+      // Trapezoidal ACOG body + fiber-optic top
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.046*s, 0.038*s, 0.13*s), matMetal);
+      body.position.set(0, 0.084*s, -0.10*s); this.viewModel.add(body);
+      const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.020*s, 0.024*s, 0.04*s, 14), matMetal);
+      bell.rotation.x = Math.PI/2; bell.position.set(0, 0.084*s, -0.18*s); this.viewModel.add(bell);
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.020*s, 16), matGlass);
+      lens.rotation.y = Math.PI; lens.position.set(0, 0.084*s, -0.20*s); this.viewModel.add(lens);
+      const fiber = new THREE.Mesh(new THREE.CylinderGeometry(0.0025*s, 0.0025*s, 0.10*s, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff8c1a }));
+      fiber.rotation.x = Math.PI/2; fiber.position.set(0, 0.108*s, -0.10*s); this.viewModel.add(fiber);
+    } else if (optic === 'holo') {
+      // Holographic sight — wide flat glass pane + housing
+      const housing = new THREE.Mesh(new THREE.BoxGeometry(0.052*s, 0.030*s, 0.07*s), matMetal);
+      housing.position.set(0, 0.078*s, -0.04*s); this.viewModel.add(housing);
+      const window_ = new THREE.Mesh(new THREE.PlaneGeometry(0.046*s, 0.034*s), matGlass);
+      window_.position.set(0, 0.080*s, -0.075*s); window_.rotation.x = -0.18; this.viewModel.add(window_);
+      const reticle = new THREE.Mesh(new THREE.CircleGeometry(0.004*s, 8),
+        new THREE.MeshBasicMaterial({ color: 0xff2030 }));
+      reticle.position.set(0, 0.080*s, -0.074*s); this.viewModel.add(reticle);
+      const battery = new THREE.Mesh(new THREE.CylinderGeometry(0.008*s, 0.008*s, 0.024*s, 8), matAccent);
+      battery.rotation.z = Math.PI/2; battery.position.set(0.030*s, 0.082*s, -0.04*s); this.viewModel.add(battery);
+    } else if (optic === 'reddot') {
       const dotBase = new THREE.Mesh(new THREE.BoxGeometry(0.038*s, 0.018*s, 0.06*s), matMetal);
       dotBase.position.set(0, 0.072*s, -0.06*s); this.viewModel.add(dotBase);
+      const housing = new THREE.Mesh(new THREE.CylinderGeometry(0.020*s, 0.020*s, 0.034*s, 14), matMetal);
+      housing.rotation.x = Math.PI/2; housing.position.set(0, 0.088*s, -0.06*s); this.viewModel.add(housing);
       const dotLens = new THREE.Mesh(new THREE.PlaneGeometry(0.026*s, 0.022*s), matGlass);
-      dotLens.position.set(0, 0.082*s, -0.034*s); dotLens.rotation.x = -0.2; this.viewModel.add(dotLens);
-      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0035*s, 8), new THREE.MeshBasicMaterial({ color: 0xff2030 }));
-      dot.position.set(0, 0.082*s, -0.033*s); this.viewModel.add(dot);
-    }
+      dotLens.position.set(0, 0.088*s, -0.044*s); dotLens.rotation.x = -0.2; this.viewModel.add(dotLens);
+      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.0035*s, 10), new THREE.MeshBasicMaterial({ color: 0xff2030 }));
+      dot.position.set(0, 0.088*s, -0.043*s); this.viewModel.add(dot);
+      // Adjustment knob
+      const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.006*s, 0.006*s, 0.012*s, 8), matMetal);
+      knob.position.set(0, 0.104*s, -0.06*s); this.viewModel.add(knob);
+    } // 'iron' = no optic, just rear+front sights already added above
     if (id === 'shotgun') {
       const pump = new THREE.Mesh(new THREE.BoxGeometry(0.09*s, 0.05*s, 0.14*s), matWood);
       pump.position.set(0, -0.045*s, -0.22*s); this.viewModel.add(pump);
@@ -4672,6 +5003,248 @@ class WeaponSystem {
         ser.position.set(0, 0.035*s, 0.04*s + i * 0.012*s); this.viewModel.add(ser);
       }
     }
+    // ============================================================
+    // EXTRA DETAIL PASS — universal small parts that read as "real gun"
+    // ============================================================
+    // Dust cover (raised strip along top of receiver)
+    const dustCover = new THREE.Mesh(new THREE.BoxGeometry(0.044*s, 0.006*s, 0.18*s), matMetal);
+    dustCover.position.set(0, 0.046*s, -0.06*s); this.viewModel.add(dustCover);
+    // Gas block (raised cube ahead of handguard)
+    const gasBlock = new THREE.Mesh(new THREE.BoxGeometry(0.034*s, 0.030*s, 0.030*s), matMetal);
+    gasBlock.position.set(0, 0.022*s, -0.06*s - barrelLen + 0.10*s); this.viewModel.add(gasBlock);
+    // Gas tube (thin cylinder running back from gas block to receiver)
+    const gasTube = new THREE.Mesh(new THREE.CylinderGeometry(0.004*s, 0.004*s, 0.18*s, 6), matMetal);
+    gasTube.rotation.x = Math.PI/2;
+    gasTube.position.set(0, 0.034*s, -0.06*s - barrelLen + 0.20*s); this.viewModel.add(gasTube);
+    // Takedown pins (two small studs on receiver side)
+    for (let pi = 0; pi < 2; pi++) {
+      const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.005*s, 0.005*s, 0.014*s, 8), matMetal);
+      pin.rotation.z = Math.PI/2;
+      pin.position.set(0.038*s, -0.018*s + pi*0.026*s, 0.02*s - pi*0.05*s); this.viewModel.add(pin);
+    }
+    // Mag-release button (small square on side of mag well)
+    const magRelease = new THREE.Mesh(new THREE.BoxGeometry(0.005*s, 0.012*s, 0.012*s), matMetal);
+    magRelease.position.set(0.038*s, -0.044*s, -0.04*s); this.viewModel.add(magRelease);
+    // Bolt catch / forward assist
+    const boltCatch = new THREE.Mesh(new THREE.BoxGeometry(0.005*s, 0.014*s, 0.020*s), matAccent);
+    boltCatch.position.set(-0.038*s, -0.010*s, 0.0*s); this.viewModel.add(boltCatch);
+    // Safety selector (round disc on grip)
+    const safety = new THREE.Mesh(new THREE.CylinderGeometry(0.010*s, 0.010*s, 0.006*s, 10), matMetal);
+    safety.rotation.z = Math.PI/2;
+    safety.position.set(0.040*s, -0.040*s, 0.06*s); this.viewModel.add(safety);
+    // Front sling swivel
+    const swivelF = new THREE.Mesh(new THREE.TorusGeometry(0.010*s, 0.0025*s, 4, 12), matMetal);
+    swivelF.rotation.y = Math.PI/2;
+    swivelF.position.set(0, -0.020*s, -0.06*s - barrelLen + 0.05*s); this.viewModel.add(swivelF);
+    // Rear sling swivel
+    const swivelR = new THREE.Mesh(new THREE.TorusGeometry(0.010*s, 0.0025*s, 4, 12), matMetal);
+    swivelR.rotation.y = Math.PI/2;
+    swivelR.position.set(0, -0.030*s, 0.22*s); this.viewModel.add(swivelR);
+    // Magazine floorplate (band at bottom of mag)
+    const magFloor = new THREE.Mesh(new THREE.BoxGeometry(0.046*s, 0.012*s, 0.066*s), matMetal);
+    magFloor.position.set(0, -0.172*s, -0.10*s); this.viewModel.add(magFloor);
+    // Optic riser mount (under the dot/scope)
+    const riser = new THREE.Mesh(new THREE.BoxGeometry(0.040*s, 0.012*s, 0.05*s), matAccent);
+    riser.position.set(0, 0.062*s, -0.06*s); this.viewModel.add(riser);
+    // Two riser thumb-screws
+    for (let ti = 0; ti < 2; ti++) {
+      const screw = new THREE.Mesh(new THREE.CylinderGeometry(0.005*s, 0.005*s, 0.014*s, 8), matMetal);
+      screw.rotation.z = Math.PI/2;
+      screw.position.set(0.022*s * (ti ? 1 : -1), 0.062*s, -0.06*s); this.viewModel.add(screw);
+    }
+    // ---- UNDERBARREL GRIP (driven by attachments) ----
+    const gripKind = _att.grip;
+    if (gripKind === 'vertical') {
+      const vg = new THREE.Mesh(new THREE.CylinderGeometry(0.014*s, 0.016*s, 0.080*s, 12), matPolymer);
+      vg.position.set(0, -0.060*s, -0.30*s); this.viewModel.add(vg);
+      // Finger ribs
+      for (let r = 0; r < 4; r++) {
+        const rib = new THREE.Mesh(new THREE.TorusGeometry(0.016*s, 0.0025*s, 6, 16), matAccent);
+        rib.rotation.x = Math.PI/2;
+        rib.position.set(0, -0.044*s - r*0.014*s, -0.30*s); this.viewModel.add(rib);
+      }
+    } else if (gripKind === 'angled') {
+      const ag = new THREE.Mesh(new THREE.BoxGeometry(0.026*s, 0.06*s, 0.034*s), matPolymer);
+      ag.rotation.x = -0.6;
+      ag.position.set(0, -0.040*s, -0.30*s); this.viewModel.add(ag);
+    } else if (gripKind === 'stubby') {
+      const sg = new THREE.Mesh(new THREE.CylinderGeometry(0.016*s, 0.018*s, 0.044*s, 12), matPolymer);
+      sg.position.set(0, -0.044*s, -0.30*s); this.viewModel.add(sg);
+    } else if (id === 'assault_rifle' || id === 'dmr' || id === 'lmg' || id === 'rifle') {
+      // Default rail cover ribs on handguard sides (no grip equipped)
+      for (let rc = 0; rc < 4; rc++) {
+        const cover = new THREE.Mesh(new THREE.BoxGeometry(0.005*s, 0.040*s, 0.04*s), matPolymer);
+        cover.position.set(0.030*s, 0.005*s, -0.36*s + rc * 0.04*s); this.viewModel.add(cover);
+        const cover2 = cover.clone(); cover2.position.x = -0.030*s; this.viewModel.add(cover2);
+      }
+    }
+    // ---- MUZZLE DEVICE (driven by attachments) ----
+    const muzzleKind = _att.muzzle;
+    const muzzleZ = -0.06*s - barrelLen - 0.05*s;
+    if (muzzleKind === 'suppressor') {
+      const supp = new THREE.Mesh(new THREE.CylinderGeometry(0.026*s, 0.024*s, 0.14*s, 16), matMetal);
+      supp.rotation.x = Math.PI/2;
+      supp.position.set(0, 0.012*s, muzzleZ - 0.04*s); this.viewModel.add(supp);
+      // Suppressor heat baffles (rings)
+      for (let r = 0; r < 5; r++) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.027*s, 0.0018*s, 6, 18), matPolymer);
+        ring.rotation.y = Math.PI/2;
+        ring.position.set(0, 0.012*s, muzzleZ - 0.10*s + r*0.026*s); this.viewModel.add(ring);
+      }
+    } else if (muzzleKind === 'compensator') {
+      const comp = new THREE.Mesh(new THREE.CylinderGeometry(0.024*s, 0.022*s, 0.060*s, 14), matMetal);
+      comp.rotation.x = Math.PI/2;
+      comp.position.set(0, 0.012*s, muzzleZ); this.viewModel.add(comp);
+      // Top venting ports
+      for (let v = 0; v < 3; v++) {
+        const port = new THREE.Mesh(new THREE.BoxGeometry(0.014*s, 0.006*s, 0.010*s), matPolymer);
+        port.position.set(0, 0.030*s, muzzleZ - 0.018*s + v*0.018*s); this.viewModel.add(port);
+      }
+    } else if (muzzleKind === 'flashhider') {
+      const fh = new THREE.Mesh(new THREE.CylinderGeometry(0.022*s, 0.020*s, 0.050*s, 14), matMetal);
+      fh.rotation.x = Math.PI/2;
+      fh.position.set(0, 0.012*s, muzzleZ); this.viewModel.add(fh);
+      // Three-prong tines
+      for (let p = 0; p < 3; p++) {
+        const tine = new THREE.Mesh(new THREE.BoxGeometry(0.004*s, 0.022*s, 0.020*s), matMetal);
+        const a = (p / 3) * Math.PI * 2;
+        tine.position.set(Math.sin(a)*0.018*s, 0.012*s + Math.cos(a)*0.018*s, muzzleZ - 0.030*s);
+        tine.rotation.z = a;
+        this.viewModel.add(tine);
+      }
+    }
+    // Adjustable cheek riser still appears for sniper class regardless of optic
+    if (id === 'sniper') {
+      const cheekPad = new THREE.Mesh(new THREE.BoxGeometry(0.044*s, 0.014*s, 0.10*s), matRubber);
+      cheekPad.position.set(0, 0.044*s, 0.30*s); this.viewModel.add(cheekPad);
+    }
+    // ============================================================
+    // PREMIUM DETAIL PASS — fine surface texture for "real gun" reads
+    // (additive parts, layered on top of everything above)
+    // ============================================================
+    // Receiver side panel screws (4 hex bolts on each side)
+    for (let sd = 0; sd < 2; sd++) {
+      const sx = sd ? 0.0395*s : -0.0395*s;
+      for (let n = 0; n < 4; n++) {
+        const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.003*s, 0.003*s, 0.005*s, 6), matMetal);
+        bolt.rotation.z = Math.PI/2;
+        bolt.position.set(sx, 0.022*s - n*0.018*s, -0.14*s + (n%2)*0.10*s);
+        this.viewModel.add(bolt);
+      }
+    }
+    // Fire-selector markings (3 little tick marks above the safety)
+    for (let m = 0; m < 3; m++) {
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(0.001*s, 0.004*s, 0.004*s),
+        new THREE.MeshBasicMaterial({ color: 0xfff0c8 }));
+      tick.position.set(0.041*s, -0.028*s + m*0.010*s, 0.06*s);
+      this.viewModel.add(tick);
+    }
+    // Trigger pin (small visible dot inside trigger guard)
+    const trigPin = new THREE.Mesh(new THREE.CylinderGeometry(0.002*s, 0.002*s, 0.012*s, 6), matMetal);
+    trigPin.rotation.z = Math.PI/2;
+    trigPin.position.set(0, -0.022*s, 0.024*s); this.viewModel.add(trigPin);
+    // Barrel fluting (thin grooves around barrel for snipers/dmrs)
+    if (id === 'sniper' || id === 'dmr') {
+      for (let f = 0; f < 6; f++) {
+        const flute = new THREE.Mesh(new THREE.BoxGeometry(0.002*s, 0.002*s, 0.18*s), matPolymer);
+        const ang = (f / 6) * Math.PI * 2;
+        flute.position.set(Math.sin(ang)*0.014*s, 0.012*s + Math.cos(ang)*0.014*s, -0.06*s - barrelLen*0.55);
+        flute.rotation.z = ang;
+        this.viewModel.add(flute);
+      }
+    }
+    // Gas-port bleed holes (3 tiny dark spots on top of barrel)
+    for (let g = 0; g < 3; g++) {
+      const hole = new THREE.Mesh(new THREE.CircleGeometry(0.0025*s, 6),
+        new THREE.MeshBasicMaterial({ color: 0x0a0a0a }));
+      hole.rotation.x = -Math.PI/2;
+      hole.position.set(0, 0.024*s, -0.06*s - barrelLen + 0.06*s + g*0.018*s);
+      this.viewModel.add(hole);
+    }
+    // Mag-well bevel (slight chamfered lip at the top for fast reloads)
+    const bevel = new THREE.Mesh(new THREE.BoxGeometry(0.052*s, 0.006*s, 0.024*s), matAccent);
+    bevel.position.set(0, -0.030*s, -0.10*s); this.viewModel.add(bevel);
+    // Brass casing visible at chamber (peek of cartridge)
+    const brassPeek = new THREE.Mesh(new THREE.CylinderGeometry(0.005*s, 0.005*s, 0.008*s, 8),
+      new THREE.MeshStandardMaterial({ color: 0xd9a83a, roughness: 0.35, metalness: 0.9 }));
+    brassPeek.rotation.z = Math.PI/2;
+    brassPeek.position.set(0.034*s, 0.014*s, -0.04*s); this.viewModel.add(brassPeek);
+    // Polymer texture cubes on grip (stippling)
+    for (let row = 0; row < 6; row++) {
+      for (let col = 0; col < 3; col++) {
+        const stip = new THREE.Mesh(new THREE.BoxGeometry(0.003*s, 0.003*s, 0.003*s), matAccent);
+        stip.position.set(-0.020*s + col*0.020*s, -0.06*s - row*0.012*s, 0.082*s);
+        this.viewModel.add(stip);
+      }
+    }
+    // QD sling-mount cup (small ring near rear of receiver)
+    const qd = new THREE.Mesh(new THREE.TorusGeometry(0.008*s, 0.002*s, 6, 14), matMetal);
+    qd.rotation.y = Math.PI/2;
+    qd.position.set(0.039*s, -0.005*s, 0.16*s); this.viewModel.add(qd);
+    // Receiver vent slits (engraved lines on top of dust cover)
+    for (let vs = 0; vs < 5; vs++) {
+      const slit = new THREE.Mesh(new THREE.BoxGeometry(0.030*s, 0.0015*s, 0.003*s),
+        new THREE.MeshBasicMaterial({ color: 0x1a1d24 }));
+      slit.position.set(0, 0.050*s, -0.10*s + vs*0.022*s); this.viewModel.add(slit);
+    }
+    // Front handguard heat-vent grill (rectangular cutouts)
+    for (let h = 0; h < 3; h++) {
+      const cut = new THREE.Mesh(new THREE.BoxGeometry(0.054*s, 0.003*s, 0.020*s),
+        new THREE.MeshBasicMaterial({ color: 0x0c0e12 }));
+      cut.position.set(0, -0.018*s, -0.34*s + h*0.030*s); this.viewModel.add(cut);
+    }
+    // Charging-handle pull tab (T-handle on the bolt)
+    const chPull = new THREE.Mesh(new THREE.BoxGeometry(0.024*s, 0.006*s, 0.010*s), matMetal);
+    chPull.position.set(0.054*s, 0.018*s, 0.04*s); this.viewModel.add(chPull);
+    // Buffer tube ring (where stock meets receiver)
+    const bufferRing = new THREE.Mesh(new THREE.TorusGeometry(0.030*s, 0.004*s, 8, 16), matMetal);
+    bufferRing.rotation.y = Math.PI/2;
+    bufferRing.position.set(0, -0.005*s, 0.20*s); this.viewModel.add(bufferRing);
+    // Picatinny rail screws on optic riser
+    for (let ps = 0; ps < 4; ps++) {
+      const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.0025*s, 0.0025*s, 0.004*s, 6), matMetal);
+      sc.position.set(-0.012*s + (ps%2)*0.024*s, 0.060*s, -0.10*s + Math.floor(ps/2)*0.08*s);
+      this.viewModel.add(sc);
+    }
+
+    // Pistol extra detail: hammer + slide release + accessory rail
+    if (id === 'pistol') {
+      const hammer = new THREE.Mesh(new THREE.BoxGeometry(0.012*s, 0.020*s, 0.010*s), matMetal);
+      hammer.position.set(0, 0.034*s, 0.10*s); this.viewModel.add(hammer);
+      const slideRel = new THREE.Mesh(new THREE.BoxGeometry(0.005*s, 0.008*s, 0.024*s), matMetal);
+      slideRel.position.set(0.040*s, 0.014*s, 0.04*s); this.viewModel.add(slideRel);
+      const accRail = new THREE.Mesh(new THREE.BoxGeometry(0.024*s, 0.008*s, 0.06*s), matAccent);
+      accRail.position.set(0, -0.024*s, -0.16*s); this.viewModel.add(accRail);
+      // Slide rib serrations on the front
+      for (let i = 0; i < 3; i++) {
+        const ser = new THREE.Mesh(new THREE.BoxGeometry(0.075*s, 0.005*s, 0.005*s), matPolymer);
+        ser.position.set(0, 0.035*s, -0.10*s - i * 0.012*s); this.viewModel.add(ser);
+      }
+    }
+    // Shotgun: shell saddle on receiver side
+    if (id === 'shotgun') {
+      for (let i = 0; i < 4; i++) {
+        const shell = new THREE.Mesh(new THREE.CylinderGeometry(0.010*s, 0.010*s, 0.034*s, 8),
+          new THREE.MeshStandardMaterial({ color: 0xa11a1a, roughness: 0.6 }));
+        shell.rotation.z = Math.PI/2;
+        shell.position.set(0.040*s, -0.012*s + i * 0.020*s, 0.02*s); this.viewModel.add(shell);
+        const brass = new THREE.Mesh(new THREE.CylinderGeometry(0.011*s, 0.011*s, 0.012*s, 8),
+          new THREE.MeshStandardMaterial({ color: 0xd9a83a, roughness: 0.4, metalness: 0.85 }));
+        brass.rotation.z = Math.PI/2;
+        brass.position.set(0.052*s, -0.012*s + i * 0.020*s, 0.02*s); this.viewModel.add(brass);
+      }
+    }
+    // LMG: ammo belt links hanging from the feed tray
+    if (id === 'lmg') {
+      for (let i = 0; i < 5; i++) {
+        const link = new THREE.Mesh(new THREE.BoxGeometry(0.014*s, 0.014*s, 0.014*s),
+          new THREE.MeshStandardMaterial({ color: 0xc9a350, roughness: 0.45, metalness: 0.85 }));
+        link.position.set(-0.05*s + i*0.022*s, -0.07*s - i*0.006*s, -0.10*s); this.viewModel.add(link);
+      }
+    }
+    // Engraved manufacturer plate (tiny accent on receiver side)
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.002*s, 0.014*s, 0.05*s), matMetal);
+    plate.position.set(0.039*s, 0.012*s, -0.10*s); this.viewModel.add(plate);
     // Muzzle flash + point light (better glow)
     const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.18),
       new THREE.MeshBasicMaterial({ color: 0xffdd66, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -4770,8 +5343,10 @@ class WeaponSystem {
     return this._muzzleWorld;
   }
   fireOneBullet(origin, dir, d, s, targets, muzzle) {
+    // Apply attachment range/damage modifiers per shot.
+    const _atsB = (window.AttachmentsAPI && !d.isMelee && !d.isMedpack) ? window.AttachmentsAPI.getStats(s.currentWeaponId) : { rangeMult: 1, damageMult: 1 };
     this.raycaster.set(origin, dir);
-    this.raycaster.far = d.range;
+    this.raycaster.far = d.range * _atsB.rangeMult;
     const hits = this.raycaster.intersectObjects(targets, true);
     let impactPoint = null;
     if (hits.length > 0) {
@@ -4796,7 +5371,7 @@ class WeaponSystem {
             else zone = 'leg';
           }
           const isHeadshot = (zone === 'head' || zone === 'helmet' || zone === 'neck');
-          const damage = this.computeZoneDamage(d, d.damage, zone);
+          const damage = this.computeZoneDamage(d, d.damage, zone) * _atsB.damageMult;
           try { window.__BLOOD__ && window.__BLOOD__.burst(hit.point.x, hit.point.y, hit.point.z, damage); } catch {}
           if (hitPlayerId.startsWith('bot_')) {
             const killed = this.bots.damageBot(hitPlayerId, damage);
@@ -4897,13 +5472,30 @@ class WeaponSystem {
     s.ammo--;
     s.fireCooldown = 1 / d.fireRate;
     const pattern = d.recoil[s.shotsFired % d.recoil.length];
+    // === Attachment + RPM-aware recoil scaling ===
+    // High-RPM weapons (P90 Vortex, Vector, Minigun) used to fling the camera
+    // off-screen because each shot added the same kick but at 2-2.5x the rate
+    // of a normal rifle. Compensate by dividing per-shot kick by sqrt(rpm/10),
+    // so total recoil-per-second stays in the same ballpark across weapons.
+    const _att = (window.AttachmentsAPI && !d.isMelee && !d.isMedpack) ? window.AttachmentsAPI.getStats(s.currentWeaponId) : { recoilMult:1, spreadMult:1, adsTimeMult:1, damageMult:1, rangeMult:1 };
+    const _rpmComp = 1 / Math.max(1, Math.sqrt((d.fireRate || 10) / 10));
+    const _recScale = _att.recoilMult * _rpmComp;
     // Recoil should kick the muzzle UP. Pitch convention here is "+ = look up",
-    // but the authored patterns store the vertical kick as a negative number,
-    // so negate it to actually raise the aim.
-    const recYaw   =  pattern[0];
-    const recPitch = -pattern[1];
+    // but the authored patterns store the vertical kick as a negative number.
+    // GLOBAL TONE-DOWN: per user feedback the previous pass added too much
+    // extra recoil on top of the baseline patterns. Scale everything down.
+    const RECOIL_GLOBAL = 0.55;
+    const recYaw   =  pattern[0] * _recScale * RECOIL_GLOBAL;
+    const recPitch = -pattern[1] * _recScale * RECOIL_GLOBAL;
     this.recoilYaw   += recYaw;
     this.recoilPitch += recPitch;
+    // === True crosshair-offset recoil ===
+    // Track unresolved recoil offset (halved from the prior pass so the
+    // user doesn't have to constantly fight the cursor down to re-acquire).
+    this.aimOffsetYaw   = (this.aimOffsetYaw   || 0) + recYaw * 0.5;
+    this.aimOffsetPitch = (this.aimOffsetPitch || 0) + recPitch * 0.5;
+    // Apply the kick to the actual camera now — player.update will let the
+    // user "pay down" the offset by dragging the mouse against it.
     this.player.state.yaw   += recYaw;
     this.player.state.pitch += recPitch;
     // Clamp so heavy auto-fire can't fling the camera past straight-up.
@@ -4911,17 +5503,17 @@ class WeaponSystem {
     if (this.player.state.pitch >  _MP) this.player.state.pitch =  _MP;
     if (this.player.state.pitch < -_MP) this.player.state.pitch = -_MP;
     s.shotsFired++;
-    // Enhanced visual recoil
-    const kickScale = (d.isMedpack ? 0 : (d.damage >= 80 ? 2.4 : (d.damage >= 50 ? 1.7 : (d.damage >= 25 ? 1.25 : 1.0))));
-    this.kickPos.z += 0.18 * d.scale * kickScale;
-    this.kickPos.y += 0.032 * kickScale;
-    this.kickPos.x += (Math.random() - 0.5) * 0.028 * kickScale;
-    this.kickRot.x -= 0.24 * kickScale;
-    this.kickRot.z += (Math.random() - 0.5) * 0.16 * kickScale;
-    this.kickRot.y += (Math.random() - 0.5) * 0.07 * kickScale;
+    // Visual viewmodel kick — toned down ~45% from the prior aggressive pass.
+    const kickScale = (d.isMedpack ? 0 : (d.damage >= 80 ? 1.6 : (d.damage >= 50 ? 1.2 : (d.damage >= 25 ? 0.95 : 0.8)))) * _recScale * RECOIL_GLOBAL;
+    this.kickPos.z += 0.16 * d.scale * kickScale;
+    this.kickPos.y += 0.028 * kickScale;
+    this.kickPos.x += (Math.random() - 0.5) * 0.020 * kickScale;
+    this.kickRot.x += 0.20 * kickScale;
+    this.kickRot.z += (Math.random() - 0.5) * 0.11 * kickScale;
+    this.kickRot.y += (Math.random() - 0.5) * 0.05 * kickScale;
     this.camera.getWorldPosition(this.rayOrigin);
     this.camera.getWorldDirection(this.rayDir);
-    const baseSpread = s.isAiming ? d.adsSpread : d.spread;
+    const baseSpread = (s.isAiming ? d.adsSpread : d.spread) * _att.spreadMult;
     if (this.network.connected) {
       this.network.sendShoot({
         senderId: this.network.localId,
@@ -5059,7 +5651,8 @@ class WeaponSystem {
   lateUpdate(dt) {
     const d = this.def;
     const adsTarget = (this.state.isAiming && !this.player.isSprinting) ? 1 : 0;
-    this.adsLerp += (adsTarget - this.adsLerp) * Math.min(1, 12 * dt);
+    const _atsAds = (window.AttachmentsAPI && !d.isMelee && !d.isMedpack) ? window.AttachmentsAPI.getStats(this.state.currentWeaponId) : { adsTimeMult: 1 };
+    this.adsLerp += (adsTarget - this.adsLerp) * Math.min(1, (12 / Math.max(0.5, _atsAds.adsTimeMult)) * dt);
     this.targetOffset.set(
       d.hipOffset.x + (d.adsOffset.x - d.hipOffset.x) * this.adsLerp,
       d.hipOffset.y + (d.adsOffset.y - d.hipOffset.y) * this.adsLerp,
@@ -5773,17 +6366,57 @@ class HUDManager {
   // Draws a tiny stylised silhouette per weapon-category onto a small canvas
   // (no external assets required — keeps everything self-contained & cheap).
   _drawWeaponIcon(canvas, weaponId, def) {
+    // Highly detailed canvas-rendered weapon icons.
+    // Drawn with layered fills, gradients, shading, rivets, rails, sights,
+    // mags and accessories so each weapon class reads distinctly even at HUD size.
     const ctx = canvas.getContext('2d');
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    const cx = w / 2, cy = h / 2;
-    // Convert THREE color int → CSS color
-    const colInt = def.color || 0x999999;
-    const baseCol = '#' + colInt.toString(16).padStart(6, '0');
-    const accentCol = def.isGold ? '#ffd34d' : '#cfd6e3';
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    // Higher-resolution math: virtual 200x96 canvas mapped to actual size.
+    const VW = 200, VH = 96;
+    ctx.scale(W / VW, H / VH);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    // Choose silhouette by category / id
+
+    const colInt = def.color || 0x4a505c;
+    const baseHex = '#' + colInt.toString(16).padStart(6, '0');
+    const accent  = def.isGold ? '#ffd34d' : '#dee4ef';
+    const dark    = '#0a0c10';
+    const wood    = '#5a3a1d';
+    const woodHi  = '#8a5a2c';
+    const polymer = '#161a22';
+    const steel   = '#9aa3b1';
+    const steelHi = '#d6dbe4';
+
+    // Helper: shaded rectangle with top highlight + bottom shadow
+    const shaded = (x, y, w, h, top, bottom, edge) => {
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, top);
+      g.addColorStop(1, bottom);
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+      if (edge) {
+        ctx.strokeStyle = edge;
+        ctx.lineWidth = 0.6;
+        ctx.strokeRect(x + 0.3, y + 0.3, w - 0.6, h - 0.6);
+      }
+    };
+    const lighten = (hex, amt = 30) => {
+      const n = parseInt(hex.slice(1), 16);
+      const r = Math.min(255, ((n >> 16) & 255) + amt);
+      const g = Math.min(255, ((n >> 8) & 255) + amt);
+      const b = Math.min(255, (n & 255) + amt);
+      return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+    };
+    const darken = (hex, amt = 50) => {
+      const n = parseInt(hex.slice(1), 16);
+      const r = Math.max(0, ((n >> 16) & 255) - amt);
+      const g = Math.max(0, ((n >> 8) & 255) - amt);
+      const b = Math.max(0, (n & 255) - amt);
+      return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+    };
+
     const cat = def.category || (
       def.isMelee ? 'melee' :
       def.isMedpack ? 'medpack' :
@@ -5799,86 +6432,567 @@ class HUDManager {
       weaponId === 'rocket_launcher' ? 'launcher' :
       'rifle'
     );
-    ctx.fillStyle = baseCol;
-    ctx.strokeStyle = accentCol;
-    ctx.lineWidth = 1.2;
-    const drawRifle = (barrelLen, stock) => {
-      // barrel
-      ctx.fillRect(cx - barrelLen / 2, cy - 3, barrelLen, 6);
-      // grip
-      ctx.fillStyle = '#222';
-      ctx.fillRect(cx - 2, cy + 3, 6, 8);
-      // mag
-      ctx.fillStyle = baseCol;
-      ctx.fillRect(cx - 6, cy + 3, 8, 7);
-      if (stock) ctx.fillRect(cx - barrelLen / 2 - 8, cy - 2, 8, 5);
-      // sight
-      ctx.fillStyle = accentCol;
-      ctx.fillRect(cx + 2, cy - 6, 4, 3);
+
+    // ---------- Shared part renderers ----------
+    const drawPicatinny = (x, y, len) => {
+      shaded(x, y, len, 3, lighten(steel, 10), darken(steel, 30), darken(steel, 60));
+      ctx.fillStyle = dark;
+      const slots = Math.max(3, Math.floor(len / 5));
+      for (let i = 0; i < slots; i++) ctx.fillRect(x + 2 + i * (len - 4) / slots, y + 0.6, 1.6, 1.8);
     };
-    if (cat === 'rifle' || cat === 'assault_rifle') drawRifle(34, true);
-    else if (cat === 'smg')                          drawRifle(24, false);
-    else if (cat === 'lmg') {
-      drawRifle(36, true);
-      // belt drum
+    const drawScope = (cx, y) => {
+      // Tube
+      shaded(cx - 22, y - 9, 44, 11, lighten(polymer, 50), polymer, dark);
+      // Bell (objective)
+      shaded(cx - 30, y - 10, 8, 13, lighten(polymer, 40), polymer, dark);
+      // Eyepiece
+      shaded(cx + 22, y - 10, 8, 13, lighten(polymer, 40), polymer, dark);
+      // Lens highlight
+      ctx.fillStyle = '#5fc4ff';
+      ctx.fillRect(cx - 29, y - 8, 6, 9);
+      ctx.fillStyle = '#a8e1ff';
+      ctx.fillRect(cx - 29, y - 8, 2, 3);
+      // Turrets
+      shaded(cx - 6, y - 14, 7, 5, lighten(polymer, 60), polymer, dark);
+      ctx.fillStyle = dark; ctx.fillRect(cx - 5, y - 13, 5, 1);
+      // Mount rings
+      ctx.fillStyle = darken(steel, 40); ctx.fillRect(cx - 14, y - 9, 3, 13);
+      ctx.fillStyle = darken(steel, 40); ctx.fillRect(cx + 12, y - 9, 3, 13);
+    };
+    const drawRedDot = (cx, y) => {
+      shaded(cx - 8, y - 9, 16, 5, lighten(polymer, 50), polymer, dark);
+      shaded(cx - 6, y - 13, 12, 5, lighten(polymer, 60), polymer, dark);
+      // Lens
+      ctx.fillStyle = '#1a3a55';
+      ctx.fillRect(cx - 5, y - 12, 10, 3);
+      ctx.fillStyle = '#ff2a2a';
+      ctx.fillRect(cx - 0.6, y - 11, 1.4, 1.4);
+    };
+    const drawTrigger = (cx, y) => {
+      // Trigger guard (loop)
+      ctx.strokeStyle = darken(baseHex, 30);
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.arc(cx, y + 9, 5, 0, Math.PI, false);
+      ctx.stroke();
+      // Trigger
+      ctx.fillStyle = steel;
+      ctx.fillRect(cx - 1, y + 5, 2, 5);
+    };
+    const drawGrip = (x, y, w = 8, h = 18, color = polymer) => {
+      ctx.save();
+      ctx.translate(x + w / 2, y + h / 2);
+      ctx.rotate(0.18);
+      const g = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+      g.addColorStop(0, lighten(color, 40));
+      g.addColorStop(1, color);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(-w / 2, -h / 2);
+      ctx.lineTo(w / 2, -h / 2);
+      ctx.lineTo(w / 2 + 1, h / 2);
+      ctx.lineTo(-w / 2 - 1, h / 2);
+      ctx.closePath();
+      ctx.fill();
+      // Grip stippling
+      ctx.fillStyle = dark;
+      for (let r = 0; r < 4; r++)
+        for (let c = 0; c < 3; c++)
+          ctx.fillRect(-w / 2 + 1.5 + c * 2, -h / 2 + 4 + r * 3, 0.8, 0.8);
+      ctx.restore();
+    };
+    const drawMag = (x, y, w, h, curve = false) => {
+      shaded(x, y, w, h, lighten(polymer, 40), polymer, dark);
+      // Floor plate
+      ctx.fillStyle = darken(polymer, 30);
+      ctx.fillRect(x - 1, y + h - 2, w + 2, 2);
+      // Witness holes
+      ctx.fillStyle = '#ffd34d';
+      for (let i = 0; i < Math.max(1, Math.floor(h / 4) - 1); i++)
+        ctx.fillRect(x + w - 2, y + 2 + i * 3.5, 1, 1);
+      if (curve) {
+        ctx.fillStyle = polymer;
+        ctx.beginPath();
+        ctx.moveTo(x, y + h);
+        ctx.quadraticCurveTo(x - 4, y + h + 6, x - 1, y + h + 8);
+        ctx.lineTo(x + w, y + h);
+        ctx.closePath();
+        ctx.fill();
+      }
+    };
+    const drawStock = (x, y, w, h) => {
+      const g = ctx.createLinearGradient(x, y, x, y + h);
+      g.addColorStop(0, lighten(polymer, 30));
+      g.addColorStop(1, polymer);
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+      // Cheek riser
+      ctx.fillStyle = lighten(polymer, 50);
+      ctx.fillRect(x + 2, y - 2, w - 4, 2);
+      // Recoil pad
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(x + w - 1, y - 1, 3, h + 2);
       ctx.fillStyle = '#333';
-      ctx.beginPath(); ctx.arc(cx - 4, cy + 9, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(x + w + 0.5, y - 1, 0.6, h + 2);
+    };
+    const drawBarrel = (x, y, len, thick) => {
+      shaded(x, y, len, thick, lighten(steel, 30), darken(steel, 40), dark);
+      // Top sheen
+      ctx.fillStyle = steelHi;
+      ctx.fillRect(x, y + 0.3, len, 0.6);
+    };
+    const drawMuzzle = (x, y, h) => {
+      shaded(x, y - 1, 6, h + 2, lighten(steel, 20), darken(steel, 50), dark);
+      // Slots in compensator
+      ctx.fillStyle = dark;
+      ctx.fillRect(x + 1, y - 0.5, 1, h + 1);
+      ctx.fillRect(x + 3, y - 0.5, 1, h + 1);
+    };
+    const drawHandguard = (x, y, w, h) => {
+      shaded(x, y, w, h, lighten(baseHex, 30), darken(baseHex, 30), dark);
+      // Vent slots
+      ctx.fillStyle = dark;
+      const vents = Math.max(3, Math.floor(w / 5));
+      for (let i = 0; i < vents; i++) ctx.fillRect(x + 2 + i * (w - 4) / vents, y + 1.5, 2, h - 3);
+      // M-LOK holes
+      ctx.fillStyle = darken(baseHex, 60);
+      for (let i = 0; i < vents - 1; i++) {
+        ctx.beginPath();
+        ctx.arc(x + 4 + i * (w - 4) / vents, y + h - 2, 0.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+    const drawSlingLoop = (x, y) => {
+      ctx.strokeStyle = steel; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.arc(x, y, 1.4, 0, Math.PI * 2); ctx.stroke();
+    };
+
+    // ---------- Per-category compositions ----------
+    if (cat === 'rifle' || cat === 'assault_rifle') {
+      const cy = 50;
+      drawStock(160, cy - 4, 28, 12);
+      // Receiver body
+      shaded(82, cy - 6, 80, 16, lighten(baseHex, 25), darken(baseHex, 25), dark);
+      // Lower receiver (mag well)
+      shaded(96, cy + 8, 36, 8, lighten(baseHex, 5), darken(baseHex, 30), dark);
+      // Picatinny rail
+      drawPicatinny(86, cy - 9, 70);
+      // Optic
+      drawRedDot(120, cy - 6);
+      // Iron front sight
+      ctx.fillStyle = steel; ctx.fillRect(64, cy - 12, 2, 6);
+      // Handguard
+      drawHandguard(40, cy - 4, 44, 10);
+      // Barrel
+      drawBarrel(8, cy - 1, 38, 4);
+      drawMuzzle(4, cy - 2, 6);
+      // Front sight post
+      ctx.fillStyle = steel; ctx.fillRect(38, cy - 7, 1.6, 6);
+      // Mag (curved AR/AK style)
+      drawMag(105, cy + 16, 18, 22, true);
+      // Trigger group
+      drawTrigger(140, cy + 8);
+      // Pistol grip
+      drawGrip(145, cy + 13, 9, 20);
+      // Charging handle
+      ctx.fillStyle = darken(steel, 20); ctx.fillRect(150, cy - 5, 8, 3);
+      // Bolt catch + safety
+      ctx.fillStyle = accent; ctx.fillRect(133, cy + 1, 3, 2);
+      ctx.fillStyle = dark; ctx.fillRect(138, cy + 4, 3, 2);
+      drawSlingLoop(166, cy);
+    }
+    else if (cat === 'smg') {
+      const cy = 50;
+      // Folding stock
+      shaded(150, cy - 3, 22, 8, lighten(polymer, 30), polymer, dark);
+      // Receiver
+      shaded(80, cy - 6, 70, 14, lighten(baseHex, 30), darken(baseHex, 25), dark);
+      drawPicatinny(86, cy - 9, 56);
+      drawRedDot(110, cy - 6);
+      // Handguard
+      drawHandguard(46, cy - 3, 36, 8);
+      drawBarrel(20, cy - 1, 28, 4);
+      drawMuzzle(16, cy - 2, 6);
+      // Compact mag
+      drawMag(102, cy + 14, 14, 22, true);
+      drawTrigger(130, cy + 6);
+      drawGrip(135, cy + 11, 8, 18);
+      ctx.fillStyle = darken(steel, 20); ctx.fillRect(140, cy - 5, 6, 3);
+    }
+    else if (cat === 'lmg') {
+      const cy = 48;
+      drawStock(168, cy - 4, 24, 14);
+      shaded(82, cy - 7, 84, 18, lighten(baseHex, 25), darken(baseHex, 30), dark);
+      drawPicatinny(86, cy - 10, 70);
+      drawRedDot(118, cy - 7);
+      drawHandguard(38, cy - 5, 46, 12);
+      drawBarrel(6, cy - 2, 36, 5);
+      drawMuzzle(2, cy - 3, 7);
+      // Heat-shield ribs on the barrel
+      ctx.fillStyle = dark;
+      for (let i = 0; i < 5; i++) ctx.fillRect(10 + i * 6, cy - 2, 1, 5);
+      // Ammo box / belt drum
+      shaded(96, cy + 10, 32, 22, lighten('#33482b', 30), '#33482b', dark);
+      ctx.fillStyle = accent;
+      ctx.fillRect(100, cy + 14, 24, 2);
+      // Visible belt
+      for (let i = 0; i < 6; i++) {
+        ctx.fillStyle = '#caa050';
+        ctx.fillRect(98 + i * 4, cy + 6, 3, 4);
+        ctx.fillStyle = dark;
+        ctx.fillRect(99 + i * 4, cy + 7, 1, 2);
+      }
+      // Bipod
+      ctx.strokeStyle = darken(steel, 20); ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(28, cy + 4); ctx.lineTo(20, cy + 18);
+      ctx.moveTo(34, cy + 4); ctx.lineTo(42, cy + 18);
+      ctx.stroke();
+      // Bipod feet
+      ctx.fillStyle = dark; ctx.fillRect(18, cy + 18, 5, 1.5); ctx.fillRect(40, cy + 18, 5, 1.5);
+      drawTrigger(146, cy + 8);
+      drawGrip(151, cy + 13, 9, 20);
     }
     else if (cat === 'sniper') {
-      ctx.fillRect(cx - 22, cy - 2, 44, 4);
-      // scope
-      ctx.fillStyle = accentCol;
-      ctx.fillRect(cx - 6, cy - 8, 14, 4);
-      // bipod
-      ctx.strokeStyle = '#222'; ctx.beginPath();
-      ctx.moveTo(cx - 14, cy + 2); ctx.lineTo(cx - 18, cy + 8);
-      ctx.moveTo(cx - 10, cy + 2); ctx.lineTo(cx - 6,  cy + 8);
+      const cy = 52;
+      drawStock(162, cy - 5, 30, 14);
+      // Bolt-action receiver
+      shaded(86, cy - 4, 76, 12, lighten(baseHex, 25), darken(baseHex, 30), dark);
+      // Bolt handle
+      ctx.fillStyle = darken(steel, 10);
+      ctx.fillRect(140, cy - 4, 5, 4);
+      ctx.beginPath(); ctx.arc(146, cy + 2, 2, 0, Math.PI * 2); ctx.fill();
+      // Long scope w/ flip-up covers
+      drawScope(115, cy - 4);
+      // Bipod
+      ctx.strokeStyle = darken(steel, 20); ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(40, cy + 4); ctx.lineTo(30, cy + 22);
+      ctx.moveTo(46, cy + 4); ctx.lineTo(56, cy + 22);
       ctx.stroke();
+      ctx.fillStyle = dark;
+      ctx.fillRect(28, cy + 22, 5, 1.5); ctx.fillRect(54, cy + 22, 5, 1.5);
+      // Long heavy barrel
+      drawBarrel(4, cy - 1, 80, 4);
+      // Suppressor / muzzle brake
+      shaded(0, cy - 3, 8, 8, lighten(polymer, 40), polymer, dark);
+      ctx.fillStyle = dark;
+      ctx.fillRect(1, cy - 1, 6, 1); ctx.fillRect(1, cy + 1, 6, 1);
+      // Mag
+      drawMag(116, cy + 12, 14, 14, false);
+      drawTrigger(140, cy + 8);
+      drawGrip(146, cy + 12, 9, 20, wood);
+      // Cheek riser pad
+      ctx.fillStyle = lighten(polymer, 40);
+      ctx.fillRect(168, cy - 8, 18, 4);
     }
     else if (cat === 'dmr') {
-      drawRifle(38, true);
-      ctx.fillStyle = accentCol;
-      ctx.fillRect(cx - 4, cy - 8, 10, 4);
+      const cy = 50;
+      drawStock(160, cy - 5, 30, 13);
+      shaded(82, cy - 6, 80, 14, lighten(baseHex, 25), darken(baseHex, 30), dark);
+      drawPicatinny(86, cy - 9, 70);
+      drawScope(118, cy - 6);
+      drawHandguard(40, cy - 4, 44, 10);
+      drawBarrel(6, cy - 1, 38, 4);
+      drawMuzzle(2, cy - 2, 6);
+      drawMag(108, cy + 14, 16, 22, true);
+      drawTrigger(140, cy + 8);
+      drawGrip(146, cy + 13, 9, 20);
     }
     else if (cat === 'shotgun') {
-      ctx.fillRect(cx - 20, cy - 3, 40, 6);
-      ctx.fillStyle = '#3a2a1a';
-      ctx.fillRect(cx - 26, cy - 2, 8, 8);
+      const cy = 50;
+      drawStock(160, cy - 5, 30, 14);
+      // Receiver
+      shaded(96, cy - 6, 64, 14, lighten(baseHex, 20), darken(baseHex, 30), dark);
+      // Wood pump
+      shaded(50, cy - 4, 44, 10, woodHi, wood, dark);
+      // Pump grip ridges
+      ctx.fillStyle = darken(wood, 50);
+      for (let i = 0; i < 5; i++) ctx.fillRect(55 + i * 8, cy - 4, 1, 10);
+      // Twin tube barrel + magazine tube
+      drawBarrel(8, cy - 4, 46, 3);
+      shaded(8, cy + 1, 46, 3, lighten(steel, 10), darken(steel, 40), dark);
+      // Bead sight
+      ctx.fillStyle = accent;
+      ctx.beginPath(); ctx.arc(12, cy - 5, 1.2, 0, Math.PI * 2); ctx.fill();
+      drawTrigger(130, cy + 8);
+      drawGrip(136, cy + 13, 9, 20, wood);
+      // Shell loops on receiver
+      ctx.fillStyle = '#a23';
+      for (let i = 0; i < 4; i++) ctx.fillRect(100 + i * 7, cy + 9, 5, 6);
+      ctx.fillStyle = '#ffd34d';
+      for (let i = 0; i < 4; i++) ctx.fillRect(100 + i * 7, cy + 9, 5, 1.5);
     }
     else if (cat === 'pistol') {
-      ctx.fillRect(cx - 4, cy - 6, 16, 5);
-      ctx.fillStyle = '#222';
-      ctx.fillRect(cx - 4, cy - 1, 6, 11);
+      const cy = 52;
+      const tone = def.isGold ? '#e8b64a' : baseHex;
+      // Slide
+      shaded(78, cy - 8, 70, 10, lighten(tone, 40), darken(tone, 20), dark);
+      // Slide serrations
+      ctx.fillStyle = dark;
+      for (let i = 0; i < 6; i++) ctx.fillRect(132 + i * 2.4, cy - 7, 1, 8);
+      // Front sight
+      ctx.fillStyle = steel; ctx.fillRect(82, cy - 11, 1.6, 3);
+      // Rear sight
+      ctx.fillStyle = steel; ctx.fillRect(140, cy - 11, 5, 3);
+      ctx.fillStyle = dark; ctx.fillRect(141.6, cy - 10.5, 2, 2);
+      // Frame / trigger area
+      shaded(86, cy + 2, 50, 8, lighten(tone, 20), darken(tone, 30), dark);
+      // Mini rail under frame
+      ctx.fillStyle = dark;
+      ctx.fillRect(94, cy + 9, 18, 2);
+      for (let i = 0; i < 3; i++) { ctx.fillStyle = steel; ctx.fillRect(96 + i * 5, cy + 9.4, 2, 1.2); }
+      // Trigger guard
+      ctx.strokeStyle = darken(tone, 40);
+      ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.arc(124, cy + 9, 5, 0, Math.PI, false); ctx.stroke();
+      ctx.fillStyle = steel; ctx.fillRect(123, cy + 5, 2, 5);
+      // Grip with stippling
+      drawGrip(132, cy + 8, 11, 28, polymer);
+      // Magazine base
+      ctx.fillStyle = darken(polymer, 20); ctx.fillRect(132, cy + 35, 13, 3);
+      // Hammer
+      ctx.fillStyle = darken(steel, 30); ctx.fillRect(146, cy - 4, 4, 4);
+      // Muzzle
+      ctx.fillStyle = dark;
+      ctx.beginPath(); ctx.arc(80, cy - 4, 2, 0, Math.PI * 2); ctx.fill();
+      // Gold engraving for golden pistol
+      if (def.isGold) {
+        ctx.strokeStyle = '#fff3b0'; ctx.lineWidth = 0.4;
+        for (let i = 0; i < 5; i++) {
+          ctx.beginPath();
+          ctx.arc(95 + i * 8, cy - 3, 1.5, 0, Math.PI, true);
+          ctx.stroke();
+        }
+      }
     }
     else if (cat === 'launcher') {
-      ctx.fillRect(cx - 22, cy - 4, 40, 8);
+      const cy = 50;
+      // Main tube
+      shaded(20, cy - 8, 140, 18, lighten(baseHex, 30), darken(baseHex, 40), dark);
+      // Front blast cone
+      ctx.fillStyle = darken(baseHex, 50);
+      ctx.beginPath();
+      ctx.moveTo(20, cy - 10); ctx.lineTo(8, cy - 14); ctx.lineTo(8, cy + 14); ctx.lineTo(20, cy + 10); ctx.closePath();
+      ctx.fill();
+      // Rear cone
+      ctx.fillStyle = darken(baseHex, 30);
+      ctx.beginPath();
+      ctx.moveTo(160, cy - 8); ctx.lineTo(180, cy - 12); ctx.lineTo(180, cy + 12); ctx.lineTo(160, cy + 8); ctx.closePath();
+      ctx.fill();
+      // Optic on top
+      shaded(70, cy - 18, 30, 8, lighten(polymer, 50), polymer, dark);
+      // Warhead poking out
       ctx.fillStyle = '#a33';
-      ctx.beginPath(); ctx.moveTo(cx + 18, cy - 6); ctx.lineTo(cx + 30, cy); ctx.lineTo(cx + 18, cy + 6); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(8, cy - 6); ctx.lineTo(-4, cy); ctx.lineTo(8, cy + 6); ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.fillRect(2, cy - 1, 2, 2);
+      // Grip
+      drawGrip(110, cy + 10, 10, 22);
+      drawTrigger(104, cy + 8);
+      // Shoulder strap pad
+      shaded(140, cy + 12, 24, 4, '#6b4a26', '#3a2a14', dark);
+      // Vent ports
+      ctx.fillStyle = dark;
+      for (let i = 0; i < 6; i++) ctx.fillRect(40 + i * 8, cy - 6, 2, 3);
     }
     else if (cat === 'melee') {
-      ctx.fillStyle = '#cfd6e3';
-      ctx.beginPath(); ctx.moveTo(cx - 12, cy + 2); ctx.lineTo(cx + 14, cy - 6); ctx.lineTo(cx + 16, cy - 2); ctx.lineTo(cx - 10, cy + 6); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#3a2a1a';
-      ctx.fillRect(cx - 18, cy + 2, 8, 4);
+      const cy = 50;
+      // Blade with shading
+      ctx.save();
+      ctx.translate(100, cy);
+      ctx.rotate(-0.2);
+      const bg = ctx.createLinearGradient(0, -8, 0, 8);
+      bg.addColorStop(0, '#f0f4ff');
+      bg.addColorStop(0.5, '#a9b5c8');
+      bg.addColorStop(1, '#5a6678');
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.moveTo(-50, 4); ctx.lineTo(40, -6); ctx.lineTo(56, 0); ctx.lineTo(40, 6); ctx.lineTo(-50, 8);
+      ctx.closePath(); ctx.fill();
+      // Edge highlight
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 0.6;
+      ctx.beginPath(); ctx.moveTo(-48, -4); ctx.lineTo(40, -5); ctx.stroke();
+      // Blood groove
+      ctx.strokeStyle = '#5a6678'; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(-40, 1); ctx.lineTo(35, -2); ctx.stroke();
+      ctx.restore();
+      // Guard
+      shaded(48, cy - 6, 6, 14, steelHi, darken(steel, 30), dark);
+      // Handle
+      shaded(20, cy - 4, 30, 9, woodHi, wood, dark);
+      // Wrap rings
+      ctx.fillStyle = dark;
+      for (let i = 0; i < 6; i++) ctx.fillRect(22 + i * 4.5, cy - 4, 1, 9);
+      // Pommel
+      shaded(14, cy - 5, 8, 11, steelHi, darken(steel, 40), dark);
     }
     else if (cat === 'medpack') {
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(cx - 12, cy - 10, 24, 20);
-      ctx.fillStyle = '#e23'; ctx.fillRect(cx - 2, cy - 8, 4, 16); ctx.fillRect(cx - 8, cy - 2, 16, 4);
+      const cy = 50;
+      // Box body with depth
+      shaded(50, cy - 22, 100, 44, '#fff', '#cfd2d8', dark);
+      // Side shadow
+      ctx.fillStyle = 'rgba(0,0,0,.18)';
+      ctx.fillRect(50, cy + 16, 100, 6);
+      // Red cross
+      ctx.fillStyle = '#d93030';
+      ctx.fillRect(92, cy - 16, 16, 32);
+      ctx.fillRect(76, cy - 0, 48, 14);
+      ctx.fillStyle = '#a31818';
+      ctx.fillRect(92, cy + 13, 16, 1);
+      ctx.fillRect(123, cy, 1, 14);
+      // Strap
+      shaded(60, cy - 26, 80, 4, '#3a2a14', '#1a1208', dark);
+      // Latches
+      ctx.fillStyle = '#888';
+      ctx.fillRect(70, cy + 2, 4, 6);
+      ctx.fillRect(126, cy + 2, 4, 6);
     }
     else if (cat === 'turret') {
-      ctx.fillStyle = '#445';
-      ctx.fillRect(cx - 10, cy + 2, 20, 8);
-      ctx.fillStyle = '#778';
-      ctx.fillRect(cx - 4, cy - 6, 18, 6);
+      const cy = 56;
+      // Tripod
+      ctx.strokeStyle = darken(steel, 30); ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(100, cy + 10); ctx.lineTo(80, cy + 30);
+      ctx.moveTo(100, cy + 10); ctx.lineTo(120, cy + 30);
+      ctx.moveTo(100, cy + 10); ctx.lineTo(100, cy + 32);
+      ctx.stroke();
+      // Base / housing
+      shaded(76, cy - 6, 48, 18, lighten('#445', 30), '#445', dark);
+      // Sensor strip
+      ctx.fillStyle = '#c33'; ctx.fillRect(82, cy - 2, 36, 2);
+      // Barrel
+      drawBarrel(8, cy - 1, 70, 4);
+      drawMuzzle(2, cy - 2, 6);
+      // Top antenna
+      ctx.strokeStyle = steel; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(110, cy - 6); ctx.lineTo(116, cy - 18); ctx.stroke();
+      ctx.fillStyle = '#ff2a2a';
+      ctx.beginPath(); ctx.arc(116, cy - 19, 1.4, 0, Math.PI * 2); ctx.fill();
     }
     else if (cat === 'orbital') {
-      ctx.strokeStyle = '#ffc766'; ctx.lineWidth = 2;
+      const cx = 100, cy = 48;
+      // Tablet body
+      shaded(50, cy - 20, 100, 40, lighten('#202632', 40), '#202632', dark);
+      // Screen
+      const sg = ctx.createLinearGradient(60, cy - 14, 140, cy + 14);
+      sg.addColorStop(0, '#241500'); sg.addColorStop(1, '#5a3a00');
+      ctx.fillStyle = sg;
+      ctx.fillRect(58, cy - 14, 84, 28);
+      // Targeting reticle
+      ctx.strokeStyle = '#ffc766'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#ffc766';
-      ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - 14, cy); ctx.lineTo(cx - 6, cy);
+      ctx.moveTo(cx + 6, cy);  ctx.lineTo(cx + 14, cy);
+      ctx.moveTo(cx, cy - 14); ctx.lineTo(cx, cy - 6);
+      ctx.moveTo(cx, cy + 6);  ctx.lineTo(cx, cy + 14);
+      ctx.stroke();
+      // Grid background
+      ctx.strokeStyle = 'rgba(255,199,102,.18)'; ctx.lineWidth = 0.4;
+      for (let i = 1; i < 6; i++) {
+        ctx.beginPath(); ctx.moveTo(58 + i * 14, cy - 14); ctx.lineTo(58 + i * 14, cy + 14); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(58, cy - 14 + i * 5); ctx.lineTo(142, cy - 14 + i * 5); ctx.stroke();
+      }
+      // Bezel buttons
+      ctx.fillStyle = '#ff4040';
+      ctx.beginPath(); ctx.arc(60, cy + 17, 1.4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3acf3a';
+      ctx.beginPath(); ctx.arc(140, cy + 17, 1.4, 0, Math.PI * 2); ctx.fill();
     }
+
+    // Subtle scratches across all icons for grit
+    ctx.strokeStyle = 'rgba(255,255,255,.08)';
+    ctx.lineWidth = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(20, 14); ctx.lineTo(60, 12);
+    ctx.moveTo(140, 78); ctx.lineTo(190, 82);
+    ctx.stroke();
+
+    // ===== ATTACHMENT OVERLAYS (per-weapon) =====
+    try {
+      const att = (window.AttachmentsAPI ? window.AttachmentsAPI.get(weaponId) : null);
+      if (att) {
+        const cy = 48;
+        // Optic badge on top of receiver
+        if (att.optic === 'reddot') {
+          ctx.fillStyle = polymer;
+          ctx.fillRect(94, cy - 14, 14, 6);
+          ctx.fillStyle = '#ff2030';
+          ctx.beginPath(); ctx.arc(101, cy - 11, 1.6, 0, Math.PI*2); ctx.fill();
+        } else if (att.optic === 'holo') {
+          ctx.fillStyle = polymer;
+          ctx.fillRect(90, cy - 14, 22, 7);
+          ctx.fillStyle = 'rgba(127,198,255,.6)';
+          ctx.fillRect(92, cy - 13, 18, 4);
+          ctx.fillStyle = '#ff2030';
+          ctx.beginPath(); ctx.arc(101, cy - 11, 1.4, 0, Math.PI*2); ctx.fill();
+        } else if (att.optic === 'acog') {
+          ctx.fillStyle = polymer;
+          ctx.fillRect(90, cy - 16, 20, 9);
+          ctx.fillStyle = steel;
+          ctx.fillRect(86, cy - 11, 6, 5);
+          ctx.fillStyle = '#ff8c1a';
+          ctx.fillRect(99, cy - 18, 2, 2);
+        } else if (att.optic === 'sniper') {
+          ctx.fillStyle = polymer;
+          ctx.fillRect(80, cy - 13, 36, 7);
+          ctx.fillStyle = steelHi;
+          ctx.fillRect(76, cy - 11, 6, 4);
+          ctx.fillStyle = 'rgba(127,198,255,.7)';
+          ctx.beginPath(); ctx.arc(78, cy - 9, 2.2, 0, Math.PI*2); ctx.fill();
+        }
+        // Muzzle device extending past the barrel
+        if (att.muzzle === 'suppressor') {
+          ctx.fillStyle = polymer;
+          ctx.fillRect(170, cy - 4, 22, 9);
+          ctx.strokeStyle = 'rgba(255,255,255,.15)';
+          ctx.lineWidth = 0.4;
+          for (let r = 0; r < 4; r++) {
+            ctx.beginPath();
+            ctx.moveTo(174 + r*5, cy - 4);
+            ctx.lineTo(174 + r*5, cy + 5);
+            ctx.stroke();
+          }
+        } else if (att.muzzle === 'compensator') {
+          ctx.fillStyle = steel;
+          ctx.fillRect(170, cy - 3, 12, 7);
+          ctx.fillStyle = polymer;
+          ctx.fillRect(172, cy - 5, 2, 2);
+          ctx.fillRect(176, cy - 5, 2, 2);
+          ctx.fillRect(180, cy - 5, 2, 2);
+        } else if (att.muzzle === 'flashhider') {
+          ctx.fillStyle = steel;
+          ctx.fillRect(170, cy - 3, 10, 7);
+          ctx.fillStyle = polymer;
+          ctx.fillRect(180, cy - 4, 2, 3);
+          ctx.fillRect(180, cy + 1, 2, 3);
+        }
+        // Underbarrel grip
+        if (att.grip === 'vertical') {
+          ctx.fillStyle = polymer;
+          ctx.fillRect(120, cy + 8, 5, 14);
+        } else if (att.grip === 'angled') {
+          ctx.fillStyle = polymer;
+          ctx.beginPath();
+          ctx.moveTo(120, cy + 8);
+          ctx.lineTo(128, cy + 18);
+          ctx.lineTo(124, cy + 20);
+          ctx.lineTo(116, cy + 10);
+          ctx.closePath();
+          ctx.fill();
+        } else if (att.grip === 'stubby') {
+          ctx.fillStyle = polymer;
+          ctx.fillRect(120, cy + 8, 6, 8);
+        }
+      }
+    } catch (e) { /* attachments optional */ }
+
+    ctx.restore();
   }
+
   buildWeaponSlots() {
     const tb = document.getElementById('hud-taskbar');
     if (!tb) return;
@@ -5898,7 +7012,10 @@ class HUDManager {
       num.textContent = (i + 1);
       const cv = document.createElement('canvas');
       cv.className = 'tb-icon';
-      cv.width = 78; cv.height = 36;
+      // Render at 3x the CSS size for sharp detail at small sizes
+      const dpr = Math.max(2, Math.min(3, window.devicePixelRatio || 1) + 1);
+      cv.width = 78 * dpr; cv.height = 36 * dpr;
+      cv.style.width = '78px'; cv.style.height = '36px';
       this._drawWeaponIcon(cv, id, def);
       const mode = document.createElement('div');
       mode.className = 'tb-mode';
@@ -5940,6 +7057,118 @@ class HUDManager {
         this._lastFireMode = label;
       }
     }
+    this.updateAttachmentLine();
+  }
+  updateAttachmentLine() {
+    const panel = document.getElementById('hud-attachments');
+    if (!panel) return;
+    const id = this.weapon.weaponIds[this.weapon.weaponIndex];
+    const def = WEAPONS[id];
+    if (!def || def.isMelee || def.isMedpack || def.isTurret || def.isOrbital || !window.AttachmentsAPI) {
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'block';
+    const a  = window.AttachmentsAPI.get(id);
+    const st = window.AttachmentsAPI.getStats(id);
+    const fmt = (m, invertColor) => {
+      const pct = Math.round((m - 1) * 100);
+      // For most stats, lower-than-baseline is GOOD (less recoil/spread/ads-time).
+      // For damageMult / rangeMult, higher is good — pass invertColor=true.
+      const positiveIsGood = !!invertColor;
+      let cls = 'ha-v';
+      if (pct !== 0) cls += positiveIsGood ? (pct > 0 ? ' good' : ' bad') : (pct < 0 ? ' good' : ' bad');
+      return { txt: (pct > 0 ? '+' : '') + pct + '%', cls };
+    };
+    const set = (elId, m, invert) => {
+      const el = document.getElementById(elId); if (!el) return;
+      const r = fmt(m, invert);
+      el.textContent = r.txt; el.className = r.cls;
+    };
+    set('ha-recoil', st.recoilMult,  false);
+    set('ha-spread', st.spreadMult,  false);
+    set('ha-ads',    st.adsTimeMult, false);
+    set('ha-dmg',    st.damageMult,  true);
+    set('ha-rng',    st.rangeMult,   true);
+    const eq = document.getElementById('ha-equip');
+    if (eq) eq.textContent = `${a.optic.toUpperCase()} · ${a.grip.toUpperCase()} · ${a.muzzle.toUpperCase()}`;
+  }
+  // === Attachment comparison panel (toggle with N) ===
+  // Shows the % delta vs CURRENTLY EQUIPPED for every alternate option in
+  // each slot. Helpful to plan trade-offs before committing.
+  toggleAttachmentCompare(force) {
+    const panel = document.getElementById('hud-att-compare');
+    if (!panel) return;
+    const want = (typeof force === 'boolean') ? force : (panel.style.display !== 'block');
+    panel.style.display = want ? 'block' : 'none';
+    if (want) this.renderAttachmentCompare();
+  }
+  renderAttachmentCompare() {
+    const panel = document.getElementById('hud-att-compare');
+    if (!panel || !window.AttachmentsAPI || !window.ATTACHMENT_STATS) return;
+    const id = this.weapon.weaponIds[this.weapon.weaponIndex];
+    const def = WEAPONS[id];
+    if (!def || def.isMelee || def.isMedpack || def.isTurret || def.isOrbital) {
+      panel.innerHTML = '<h3>NO ATTACHMENTS</h3><div class="acmp-sub">This weapon has no attachment slots.</div>';
+      return;
+    }
+    const cur = window.AttachmentsAPI.get(id);
+    const curStats = window.AttachmentsAPI.getStats(id);
+    // For each slot, simulate equipping each option (without mutating live state)
+    const STATS = window.ATTACHMENT_STATS;
+    const ATT = { optic: ['iron','reddot','holo','acog','sniper'], muzzle: ['none','suppressor','compensator','flashhider'], grip: ['none','vertical','angled','stubby'] };
+    const _calc = (slotName, optionName) => {
+      const o = STATS.optic [slotName === 'optic'  ? optionName : cur.optic ] || STATS.optic.iron;
+      const m = STATS.muzzle[slotName === 'muzzle' ? optionName : cur.muzzle] || STATS.muzzle.none;
+      const g = STATS.grip  [slotName === 'grip'   ? optionName : cur.grip  ] || STATS.grip.none;
+      return {
+        recoilMult: o.recoilMult * m.recoilMult * g.recoilMult,
+        spreadMult: o.spreadMult * m.spreadMult * g.spreadMult,
+        adsTimeMult: o.adsTimeMult * m.adsTimeMult * g.adsTimeMult,
+        damageMult: o.damageMult * m.damageMult * g.damageMult,
+        rangeMult:  o.rangeMult  * m.rangeMult  * g.rangeMult,
+      };
+    };
+    // delta vs current equipped: returns {txt, cls}
+    const _delta = (newV, oldV, higherIsBetter) => {
+      const pct = Math.round((newV / oldV - 1) * 100);
+      let cls = 'acmp-neu';
+      if (pct !== 0) cls = higherIsBetter ? (pct > 0 ? 'acmp-good' : 'acmp-bad')
+                                          : (pct < 0 ? 'acmp-good' : 'acmp-bad');
+      return `<span class="${cls}">${pct > 0 ? '+' : ''}${pct}%</span>`;
+    };
+    const _renderSlot = (slotName, options) => {
+      let rows = '';
+      for (const opt of options) {
+        const s = _calc(slotName, opt);
+        const isCur = (cur[slotName] === opt);
+        rows += `<tr class="${isCur ? 'acmp-current' : ''}">
+          <td class="acmp-name">${opt.toUpperCase()}</td>
+          <td>${_delta(s.recoilMult,  curStats.recoilMult,  false)}</td>
+          <td>${_delta(s.spreadMult,  curStats.spreadMult,  false)}</td>
+          <td>${_delta(s.adsTimeMult, curStats.adsTimeMult, false)}</td>
+          <td>${_delta(s.damageMult,  curStats.damageMult,  true )}</td>
+          <td>${_delta(s.rangeMult,   curStats.rangeMult,   true )}</td>
+        </tr>`;
+      }
+      return `<div class="acmp-slot">
+        <div class="acmp-slot-title">${slotName.toUpperCase()}</div>
+        <table>
+          <thead><tr>
+            <th>OPTION</th><th>RECOIL</th><th>ACC</th><th>ADS</th><th>DMG</th><th>RNG</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    };
+    panel.innerHTML = `
+      <h3>ATTACHMENT COMPARE</h3>
+      <div class="acmp-sub">Δ vs current loadout · green = better · red = worse</div>
+      ${_renderSlot('optic',  ATT.optic)}
+      ${_renderSlot('grip',   ATT.grip)}
+      ${_renderSlot('muzzle', ATT.muzzle)}
+      <div class="acmp-foot">PRESS N TO CLOSE  ·  [ ] \\ TO EQUIP</div>
+    `;
   }
   flashFireMode(mode) {
     const el = document.getElementById('fire-mode-toast');
@@ -7957,6 +9186,53 @@ window.LoadoutAPI = null;
       e.preventDefault();
       const next = weapons.cycleFireMode && weapons.cycleFireMode();
       if (next && hud && hud.flashFireMode) hud.flashFireMode(next);
+      return;
+    }
+    // [ / ] / \ = cycle attachments on current weapon
+    // [  -> optic, ]  -> grip, \  -> muzzle device
+    if (gameStarted && !settingsPanel.isOpen && !upgradeMenu.isOpen &&
+        (e.code === 'BracketLeft' || e.code === 'BracketRight' || e.code === 'Backslash')) {
+      e.preventDefault();
+      const slot = e.code === 'BracketLeft' ? 'optic'
+                 : e.code === 'BracketRight' ? 'grip'
+                 : 'muzzle';
+      const wid = weapons.state.currentWeaponId;
+      const def = WEAPONS[wid];
+      // Don't cycle on melee / medpack / turret / orbital
+      if (def && !(def.isMelee || def.isMedpack || def.isTurret || def.isOrbital)) {
+        const newVal = window.AttachmentsAPI.cycle(wid, slot);
+        weapons.buildGun();
+        if (window.SkinAPI) window.SkinAPI.applyToViewModel(weapons.viewModel, wid);
+        // Force HUD icon to repaint for this slot
+        try {
+          const idx = weapons.weaponIds.indexOf(wid);
+          if (idx >= 0 && hud && hud._taskbarSlots && hud._taskbarSlots[idx]) {
+            const cv = hud._taskbarSlots[idx].querySelector('canvas.tb-icon');
+            if (cv) hud._drawWeaponIcon(cv, wid, def);
+          }
+        } catch (_) {}
+        // Show stat-effect summary in the toast
+        const st = window.AttachmentsAPI.getStats(wid);
+        const fmt = (m) => {
+          const pct = Math.round((m - 1) * 100);
+          return (pct > 0 ? '+' : '') + pct + '%';
+        };
+        const msg = `${slot.toUpperCase()}: ${newVal}  •  RECOIL ${fmt(st.recoilMult)}  ACC ${fmt(st.spreadMult)}  ADS ${fmt(st.adsTimeMult)}  DMG ${fmt(st.damageMult)}  RNG ${fmt(st.rangeMult)}`;
+        if (hud && hud.flashFireMode) hud.flashFireMode(msg);
+        // Update persistent attachment line on active slot
+        try { if (hud && hud.updateAttachmentLine) hud.updateAttachmentLine(); } catch(_) {}
+        // If compare panel is visible, repaint it with the new "current" baseline
+        try {
+          const cmp = document.getElementById('hud-att-compare');
+          if (cmp && cmp.style.display === 'block' && hud.renderAttachmentCompare) hud.renderAttachmentCompare();
+        } catch(_) {}
+      }
+      return;
+    }
+    // N = toggle attachment comparison panel
+    if (gameStarted && !settingsPanel.isOpen && !upgradeMenu.isOpen && e.code === 'KeyN') {
+      e.preventDefault();
+      if (hud && hud.toggleAttachmentCompare) hud.toggleAttachmentCompare();
       return;
     }
     if (e.code === 'Escape' && gameStarted) {
