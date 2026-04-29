@@ -3264,11 +3264,11 @@ class PlayerController {
       this.state.velocity.z = fz * this.SLIDE_BOOST;
       if (SOUND) SOUND.slide();
     }
-    const wantCrouch = this.isSliding || (cDown && !wantSprint);
+    const wantCrouch = this.isSliding || (cDown && !wantSprint) || !!this.forceCrouch;
     this.state.isCrouching = wantCrouch && !this.isSliding;
     const targetEye = this.isSliding ? this.SLIDE_HEIGHT : (wantCrouch ? this.CROUCH_HEIGHT : this.STAND_HEIGHT);
     this.eyeHeight += (targetEye - this.eyeHeight) * Math.min(1, 14 * dt);
-    this.isSprinting = wantSprint && !wantCrouch && !this.isSliding;
+    this.isSprinting = wantSprint && !wantCrouch && !this.isSliding && !this.forceCrouch;
     // ---- LEAN INPUT ----
     let leanTarget = 0;
     let _qDir = this.settings.get('leanQRight') ? +1 : -1;
@@ -5687,7 +5687,62 @@ class WeaponSystem {
     this.targetOffset.x += this.kickPos.x;
     this.targetOffset.y += this.kickPos.y;
     this.targetOffset.z += this.kickPos.z;
-    this.currentOffset.lerp(this.targetOffset, Math.min(1, 18 * dt));
+    // ---- THROW POSE (grenade / molotov) ----
+    // Drives a clear over-the-shoulder wind-up followed by a forward release.
+    // Uses two half-curves: 0..0.45 = wind-up (pull arm back & up), 0.45..1 = release (slam forward & down).
+    let _throwSlerp = 0; // smoothing factor toward throw rotation (so we override sway/lean)
+    try {
+      const G = window.__GRENADES__;
+      if (G && G.throwAnimT > 0 && G.throwAnimDur > 0) {
+        const tNorm = 1 - (G.throwAnimT / G.throwAnimDur); // 0 -> 1 over animation
+        _throwSlerp = Math.min(1, Math.sin(tNorm * Math.PI) * 1.4); // ease in/out
+        let dx, dy, dz, rotX, rotZ;
+        if (tNorm < 0.45) {
+          // Wind-up: pull weapon back over shoulder, tilt arm up
+          const u = tNorm / 0.45;
+          const e = u * u * (3 - 2 * u); // smoothstep
+          dx =  0.18 * e;            // arm pulls to the right (right-handed)
+          dy =  0.22 * e;            // raises up to shoulder
+          dz =  0.30 * e;            // pulls back toward camera
+          rotX = -1.05 * e;          // wrist cocks up
+          rotZ =  0.55 * e;          // tilts inward
+        } else {
+          // Release + follow-through: snap forward and down
+          const u = (tNorm - 0.45) / 0.55;
+          const e = 1 - Math.pow(1 - u, 3); // ease-out cubic, fast release
+          dx =  0.18 * (1 - e) - 0.10 * e;
+          dy =  0.22 * (1 - e) - 0.18 * e;  // overshoots downward on follow-through
+          dz =  0.30 * (1 - e) - 0.22 * e;  // punches forward past rest
+          rotX = -1.05 * (1 - e) + 0.65 * e;
+          rotZ =  0.55 * (1 - e) - 0.18 * e;
+        }
+        this.targetOffset.x += dx;
+        this.targetOffset.y += dy;
+        this.targetOffset.z += dz;
+        this.kickRot.x += rotX;
+        this.kickRot.z += rotZ;
+      }
+    } catch {}
+    // ---- MINE DEPLOY POSE: crouch + "fiddle with the strings" ----
+    try {
+      const M = window.__MINES__;
+      if (M && M.deploying && M.DEPLOY_TIME > 0) {
+        const u = Math.min(1, M.deployT / M.DEPLOY_TIME);
+        // Hands drop low and toward center (working at the ground in front of feet)
+        const drop = Math.sin(u * Math.PI); // peaks mid-deploy
+        this.targetOffset.x += -0.04 * drop;
+        this.targetOffset.y += -0.42 * drop;   // hands very low — at the mine
+        this.targetOffset.z += -0.08 * drop;   // pushed forward
+        // Fiddling jitter — small high-frequency wrist movements like tying strings
+        const f = M.deployT * 22;
+        this.targetOffset.x += Math.sin(f * 1.7) * 0.018 * drop;
+        this.targetOffset.y += Math.cos(f * 2.3) * 0.014 * drop;
+        this.kickRot.x += (0.55 + Math.sin(f) * 0.12) * drop; // tilt down to look at hands
+        this.kickRot.z += Math.sin(f * 1.3) * 0.18 * drop;     // wrist twist
+        _throwSlerp = Math.max(_throwSlerp, drop * 0.8);
+      }
+    } catch {}
+    this.currentOffset.lerp(this.targetOffset, Math.min(1, (18 + _throwSlerp * 18) * dt));
     this.viewModel.position.copy(this.currentOffset);
     const sprintTiltZ = this._sprintLerp * -0.45;
     const sprintTiltY = this._sprintLerp * 0.35;
@@ -5974,6 +6029,9 @@ class GrenadeSystem {
     this.network = network; this.bots = bots; this.input = input;
     this.weapons = weapons; this.destruction = destruction;
     this.count = GRENADE_MAX; this.cooldown = 0; this.active = [];
+    // Throw animation timer (shared between grenades & molotovs). Drives a
+    // dedicated wind-up + release pose on the weapon viewmodel.
+    this.throwAnimT = 0; this.throwAnimDur = 0.55; this.throwAnimKind = null;
     this._mat = new THREE.MeshStandardMaterial({ color: 0x394a2b, roughness: 0.7, metalness: 0.4 });
     this._geo = new THREE.SphereGeometry(GRENADE_SIZE, 10, 8);
     this._flashGeo = new THREE.SphereGeometry(1, 16, 12);
@@ -6015,6 +6073,7 @@ class GrenadeSystem {
     if (this.molotovCount <= 0 || this.molotovCooldown > 0) return;
     if (this.player.state.isDead) return;
     this.molotovCount--; this.molotovCooldown = MOLOTOV_THROW_COOLDOWN;
+    this.throwAnimT = this.throwAnimDur; this.throwAnimKind = 'molotov';
     if (SOUND) SOUND.grenadeThrow();
     const ps = this.player.state;
     const fx = -Math.sin(ps.yaw) * Math.cos(ps.pitch);
@@ -6131,6 +6190,7 @@ class GrenadeSystem {
     if (this.count <= 0 || this.cooldown > 0) return;
     if (this.player.state.isDead) return;
     this.count--; this.cooldown = GRENADE_THROW_COOLDOWN;
+    this.throwAnimT = this.throwAnimDur; this.throwAnimKind = 'grenade';
     if (SOUND) { SOUND.grenadePin(); SOUND.grenadeThrow(); }
     const ps = this.player.state;
     const fx = -Math.sin(ps.yaw) * Math.cos(ps.pitch);
@@ -6169,28 +6229,34 @@ class GrenadeSystem {
   _collide(g, dt) {
     const p = g.mesh.position, r = GRENADE_SIZE;
     const meshes = this.map.bulletTargetMeshes;
-    const bbox = new THREE.Box3();
+    // Precompute bounding boxes once per call instead of 3x per mesh per grenade per frame.
+    if (!this._collideBoxes || this._collideBoxes.length !== meshes.length) {
+      this._collideBoxes = new Array(meshes.length);
+      for (let i = 0; i < meshes.length; i++) this._collideBoxes[i] = new THREE.Box3();
+    }
+    const boxes = this._collideBoxes;
+    for (let i = 0; i < meshes.length; i++) boxes[i].setFromObject(meshes[i]);
     p.x += g.vel.x * dt;
-    for (const m of meshes) {
-      bbox.setFromObject(m);
-      if (p.x + r > bbox.min.x && p.x - r < bbox.max.x && p.y + r > bbox.min.y && p.y - r < bbox.max.y && p.z + r > bbox.min.z && p.z - r < bbox.max.z) {
-        if (g.vel.x > 0) p.x = bbox.min.x - r; else p.x = bbox.max.x + r;
+    for (let i = 0; i < meshes.length; i++) {
+      const b = boxes[i];
+      if (p.x + r > b.min.x && p.x - r < b.max.x && p.y + r > b.min.y && p.y - r < b.max.y && p.z + r > b.min.z && p.z - r < b.max.z) {
+        if (g.vel.x > 0) p.x = b.min.x - r; else p.x = b.max.x + r;
         g.vel.x *= -GRENADE_BOUNCE; g.vel.y *= 0.92; g.vel.z *= 0.85;
       }
     }
     p.z += g.vel.z * dt;
-    for (const m of meshes) {
-      bbox.setFromObject(m);
-      if (p.x + r > bbox.min.x && p.x - r < bbox.max.x && p.y + r > bbox.min.y && p.y - r < bbox.max.y && p.z + r > bbox.min.z && p.z - r < bbox.max.z) {
-        if (g.vel.z > 0) p.z = bbox.min.z - r; else p.z = bbox.max.z + r;
+    for (let i = 0; i < meshes.length; i++) {
+      const b = boxes[i];
+      if (p.x + r > b.min.x && p.x - r < b.max.x && p.y + r > b.min.y && p.y - r < b.max.y && p.z + r > b.min.z && p.z - r < b.max.z) {
+        if (g.vel.z > 0) p.z = b.min.z - r; else p.z = b.max.z + r;
         g.vel.z *= -GRENADE_BOUNCE; g.vel.x *= 0.85; g.vel.y *= 0.92;
       }
     }
     p.y += g.vel.y * dt;
-    for (const m of meshes) {
-      bbox.setFromObject(m);
-      if (p.x + r > bbox.min.x && p.x - r < bbox.max.x && p.y + r > bbox.min.y && p.y - r < bbox.max.y && p.z + r > bbox.min.z && p.z - r < bbox.max.z) {
-        if (g.vel.y > 0) p.y = bbox.min.y - r; else p.y = bbox.max.y + r;
+    for (let i = 0; i < meshes.length; i++) {
+      const b = boxes[i];
+      if (p.x + r > b.min.x && p.x - r < b.max.x && p.y + r > b.min.y && p.y - r < b.max.y && p.z + r > b.min.z && p.z - r < b.max.z) {
+        if (g.vel.y > 0) p.y = b.min.y - r; else p.y = b.max.y + r;
         g.vel.y *= -GRENADE_BOUNCE; g.vel.x *= 0.85; g.vel.z *= 0.85;
       }
     }
@@ -6263,6 +6329,10 @@ class GrenadeSystem {
   update(dt) {
     if (this.cooldown > 0) this.cooldown -= dt;
     if (this.molotovCooldown > 0) this.molotovCooldown -= dt;
+    if (this.throwAnimT > 0) {
+      this.throwAnimT -= dt;
+      if (this.throwAnimT <= 0) { this.throwAnimT = 0; this.throwAnimKind = null; }
+    }
     if (this._wasDead && !this.player.state.isDead) { this.count = GRENADE_MAX; this.molotovCount = MOLOTOV_MAX; }
     this._wasDead = this.player.state.isDead;
     if (this.input.isKeyPressed('KeyG')) this.throwGrenade();
@@ -8705,10 +8775,25 @@ window.LoadoutAPI = null;
       this._geo = new THREE.CylinderGeometry(0.35, 0.35, 0.12, 14);
       this._mat = new THREE.MeshStandardMaterial({ color: 0x8a2a2a, emissive: 0x300000, roughness: 0.6 });
       this._matArmed = new THREE.MeshStandardMaterial({ color: 0xff2a2a, emissive: 0x661010, roughness: 0.5 });
+      // Deployment animation state — player crouches and "fiddles with the strings"
+      // before the mine actually appears. While deploying we expose `isDeployingMine`
+      // on the player so the controller can force-crouch and the weapon viewmodel
+      // can swap in a wiring/fiddling pose.
+      this.DEPLOY_TIME = 1.4;
+      this.deploying = false;
+      this.deployT = 0;
+    }
+    beginPlace() {
+      if (this.player.state.isDead) return;
+      if (this.cooldown > 0 || this.stock <= 0 || this.deploying) return;
+      this.deploying = true;
+      this.deployT = 0;
+      this.player.forceCrouch = true;
+      this.player.isDeployingMine = true;
+      if (SOUND && SOUND.grenadePin) { try { SOUND.grenadePin(); } catch {} }
     }
     place() {
-      if (this.player.state.isDead) return;
-      if (this.cooldown > 0 || this.stock <= 0) return;
+      // Actual spawn — called when the deploy animation finishes.
       const p = this.player.state.position;
       const yaw = this.player.state.yaw || 0;
       const backOffset = 1.35;
@@ -8727,7 +8812,8 @@ window.LoadoutAPI = null;
     damageMine(mine, dmg = 1) {
       if (mine.exploded) return false;
       mine.hp -= dmg;
-      if (mine.hp <= 0) { this._removeMine(mine, false); return true; }
+      // When a mine takes lethal damage (e.g. shot), it should DETONATE rather than silently vanish.
+      if (mine.hp <= 0) { this._removeMine(mine, true); return true; }
       return false;
     }
     _removeMine(mine, didExplode) {
@@ -8779,9 +8865,27 @@ window.LoadoutAPI = null;
     }
     update(dt) {
       if (this.cooldown > 0) this.cooldown -= dt;
-      if (this._wasDead && !this.player.state.isDead) this.stock = this.MAX_STOCK;
+      if (this._wasDead && !this.player.state.isDead) {
+        this.stock = this.MAX_STOCK;
+        this.deploying = false; this.deployT = 0;
+        this.player.forceCrouch = false; this.player.isDeployingMine = false;
+      }
       this._wasDead = this.player.state.isDead;
-      if (input.isKeyPressed('KeyO')) this.place();
+      // Begin deployment when the player presses O. Cancel cleanly on death.
+      if (input.isKeyPressed('KeyO')) this.beginPlace();
+      if (this.deploying) {
+        if (this.player.state.isDead) {
+          this.deploying = false; this.deployT = 0;
+          this.player.forceCrouch = false; this.player.isDeployingMine = false;
+        } else {
+          this.deployT += dt;
+          if (this.deployT >= this.DEPLOY_TIME) {
+            this.place();
+            this.deploying = false; this.deployT = 0;
+            this.player.forceCrouch = false; this.player.isDeployingMine = false;
+          }
+        }
+      }
       for (let i = this.mines.length - 1; i >= 0; i--) {
         const m = this.mines[i];
         if (m.exploded) { this.mines.splice(i, 1); continue; }
@@ -8906,6 +9010,7 @@ window.LoadoutAPI = null;
   const economy = new EconomySystem(player, weapons, mines);
   const upgradeMenu = new UpgradeMenuController(input, weapons, economy);
   window.__MINES__ = mines;
+  window.__GRENADES__ = grenades;
   window.__KILLSTREAKS__ = killstreaks;
   window.__DESTRUCTION__ = destruction;
   window.__BLOOD__ = bloodFX;
