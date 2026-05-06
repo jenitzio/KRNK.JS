@@ -1831,7 +1831,8 @@ class GameEngine {
     this.clock = new GameClock();
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x131a2a);
-    this.scene.fog = new THREE.FogExp2(0x131a2a, 0.0055);
+    this.scene.fog = new THREE.FogExp2(0x14213a, 0.0048);
+    this.scene.background = new THREE.Color(0x14213a);
     this.camera = new THREE.PerspectiveCamera(
       settings.get('fov'),
       window.innerWidth / window.innerHeight,
@@ -1842,6 +1843,8 @@ class GameEngine {
       stencil: false, depth: true, alpha: false, preserveDrawingBuffer: false
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.22;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
     this.renderer.shadowMap.enabled = settings.get('shadowsEnabled');
     this.renderer.shadowMap.type = THREE.BasicShadowMap;
@@ -2643,9 +2646,9 @@ class MapBuilder {
       this.createBox(0.4, 0.8, 4, bx + 2, 2.0, bz, wallMat);
       this.createBox(4.4, 0.3, 4.4, bx, 2.45, bz, roofMat);
     }
-    const ambient = new THREE.AmbientLight(0x556080, 0.7);
+    const ambient = new THREE.AmbientLight(0x6878a0, 0.95);
     this.scene.add(ambient);
-    const hemi = new THREE.HemisphereLight(0x7faaff, 0x1a1f2f, 0.5);
+    const hemi = new THREE.HemisphereLight(0x9fc4ff, 0x252a3a, 0.75);
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff2d0, 1.15);
     sun.position.set(55, 80, 45);
@@ -2660,6 +2663,9 @@ class MapBuilder {
     sun.shadow.camera.bottom = -400;
     this.scene.add(sun);
     this.sun = sun;
+    const fill = new THREE.DirectionalLight(0xffd9a8, 0.18);
+    fill.position.set(-50, 30, -40);
+    this.scene.add(fill);
     const p1 = new THREE.PointLight(0xff5555, 0.5, 22);
     p1.position.set(-80, 4, -80);
     this.scene.add(p1);
@@ -2670,9 +2676,305 @@ class MapBuilder {
       this.sun.castShadow = v;
       for (const mesh of this.meshes) if (mesh.isMesh) mesh.castShadow = v;
     });
-    this.bulletTargetMeshes = this.meshes.filter(m => m.isMesh);
+    this.addEnvironmentDetail();
+    this.bulletTargetMeshes = this.meshes.filter(m => m.isMesh && !m.isInstancedMesh);
     this._buildSpatialGrid();
   }
+
+  // ============================================================
+  // ENVIRONMENTAL DETAIL PASS — uses THREE.InstancedMesh so that
+  // hundreds of decorative props add only a handful of draw calls.
+  // No new colliders, no shadow maps. Pure visual richness.
+  // ============================================================
+  addEnvironmentDetail() {
+    const S = this.scene;
+    const tmp = new THREE.Object3D();
+    const addInstanced = (geo, mat, transforms) => {
+      if (!transforms.length) return null;
+      const im = new THREE.InstancedMesh(geo, mat, transforms.length);
+      im.castShadow = false; im.receiveShadow = false;
+      im.frustumCulled = true;
+      for (let i = 0; i < transforms.length; i++) {
+        const t = transforms[i];
+        tmp.position.set(t.x, t.y, t.z);
+        tmp.rotation.set(t.rx || 0, t.ry || 0, t.rz || 0);
+        tmp.scale.set(t.sx || 1, t.sy || 1, t.sz || 1);
+        tmp.updateMatrix();
+        im.setMatrixAt(i, tmp.matrix);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      S.add(im);
+      this.meshes.push(im);
+      return im;
+    };
+
+    // Material palette (one of each, shared across many instanced meshes)
+    const matPole    = new THREE.MeshStandardMaterial({ color: 0x1a1d24, roughness: 0.55, metalness: 0.7 });
+    const matLamp    = new THREE.MeshStandardMaterial({ color: 0xffd58a, emissive: 0xffaa44, emissiveIntensity: 1.4, roughness: 0.4 });
+    const matRustMtl = new THREE.MeshStandardMaterial({ color: 0x3b3026, roughness: 0.85, metalness: 0.55 });
+    const matBarrel  = new THREE.MeshStandardMaterial({ color: 0x4a4032, roughness: 0.8, metalness: 0.35 });
+    const matBarrelTop = new THREE.MeshStandardMaterial({ color: 0x2d251a, roughness: 0.9, metalness: 0.2 });
+    const matSandbag = new THREE.MeshStandardMaterial({ color: 0x6b5a3a, roughness: 0.95, metalness: 0.0 });
+    const matAcUnit  = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, roughness: 0.6, metalness: 0.5 });
+    const matAcVent  = new THREE.MeshStandardMaterial({ color: 0x222830, roughness: 0.85, metalness: 0.3 });
+    const matAntenna = new THREE.MeshStandardMaterial({ color: 0x131618, roughness: 0.5, metalness: 0.8 });
+    const matPipe    = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 0.7, metalness: 0.6 });
+    const matWindow  = new THREE.MeshStandardMaterial({ color: 0x86b9ff, emissive: 0x4d8fff, emissiveIntensity: 0.85, roughness: 0.25, metalness: 0.4 });
+    const matWindowOff = new THREE.MeshStandardMaterial({ color: 0x141a26, roughness: 0.4, metalness: 0.55 });
+    const matCone    = new THREE.MeshStandardMaterial({ color: 0xff7a2e, roughness: 0.8, metalness: 0.05 });
+    const matFoliage = new THREE.MeshStandardMaterial({ color: 0x3d5a32, roughness: 0.95, metalness: 0.0 });
+    const matFoliageDark = new THREE.MeshStandardMaterial({ color: 0x2c4326, roughness: 0.95 });
+    const matPallet  = new THREE.MeshStandardMaterial({ color: 0x6b4a26, roughness: 0.92, metalness: 0.05 });
+    const matStripe  = new THREE.MeshBasicMaterial({ color: 0xfff0a8 });
+
+    // Geometries (one per shape, reused everywhere)
+    const gPolePost  = new THREE.CylinderGeometry(0.08, 0.10, 4.2, 6);
+    const gPoleArm   = new THREE.BoxGeometry(0.06, 0.06, 1.0);
+    const gLampHead  = new THREE.BoxGeometry(0.5, 0.18, 0.32);
+    const gBarrelBody= new THREE.CylinderGeometry(0.42, 0.42, 1.05, 12);
+    const gBarrelLid = new THREE.CylinderGeometry(0.43, 0.43, 0.06, 12);
+    const gBarrelBand= new THREE.TorusGeometry(0.42, 0.025, 4, 14);
+    const gSandbag   = new THREE.BoxGeometry(0.7, 0.32, 0.42);
+    const gAcUnit    = new THREE.BoxGeometry(1.4, 0.9, 1.0);
+    const gAcVent    = new THREE.BoxGeometry(1.0, 0.06, 0.7);
+    const gAcFan     = new THREE.CylinderGeometry(0.35, 0.35, 0.05, 10);
+    const gAntenna   = new THREE.CylinderGeometry(0.025, 0.025, 3.2, 5);
+    const gAntennaPad= new THREE.BoxGeometry(0.45, 0.10, 0.45);
+    const gPipeSeg   = new THREE.CylinderGeometry(0.10, 0.10, 1.0, 8);
+    const gPipeElbow = new THREE.SphereGeometry(0.11, 6, 6);
+    const gWindow    = new THREE.PlaneGeometry(1.1, 0.7);
+    const gWindowFrame = new THREE.BoxGeometry(1.18, 0.78, 0.04);
+    const gCone      = new THREE.ConeGeometry(0.32, 0.85, 8);
+    const gFoliage   = new THREE.SphereGeometry(0.7, 6, 5);
+    const gFoliageS  = new THREE.SphereGeometry(0.45, 6, 5);
+    const gPallet    = new THREE.BoxGeometry(1.2, 0.14, 1.0);
+    const gPalletPlank = new THREE.BoxGeometry(0.16, 0.05, 1.0);
+    const gStripe    = new THREE.PlaneGeometry(2.4, 0.18);
+    const gManhole   = new THREE.CircleGeometry(0.6, 18);
+
+    // ---- Street lamps along grid ----
+    const lamps = [];
+    const lampHeads = [];
+    const lampLights = [];
+    const lampSpots = [
+      [-30,-30],[30,-30],[-30,30],[30,30],
+      [-90,0],[90,0],[0,-90],[0,90],
+      [-60,-60],[60,60],[-60,60],[60,-60],
+      [-120,-30],[120,30],[-120,30],[120,-30],
+      [-150,90],[150,-90],[-150,-90],[150,90],
+      [-30,-150],[30,150],[-30,150],[30,-150],
+      [-180,180],[180,-180],[-180,-180],[180,180],
+      [-90,200],[90,-200],[-90,-200],[90,200],
+      [-200,0],[200,0],[0,-220],[0,220]
+    ];
+    for (const [x, z] of lampSpots) {
+      lamps.push({ x, y: 2.1, z });
+      lampHeads.push({ x, y: 4.05, z });
+      lampLights.push({ x, y: 4.0, z });
+    }
+    addInstanced(gPolePost, matPole, lamps);
+    addInstanced(gLampHead, matLamp, lampHeads);
+    // A handful of cheap ambient point-lights at lamps for atmosphere.
+    // (Limit to ~6 — more would tank perf on integrated GPUs.)
+    const lit = [[-30,-30],[30,30],[-90,0],[90,0],[0,-90],[0,90]];
+    for (const [x, z] of lit) {
+      const pl = new THREE.PointLight(0xffb858, 0.6, 14, 1.5);
+      pl.position.set(x, 4.0, z);
+      S.add(pl);
+    }
+
+    // ---- Barrels (drum stacks near corners / cover spots) ----
+    const barrels = [
+      [-50,-50],[50,50],[-50,50],[50,-50],
+      [-22,-65],[22,65],[-22,65],[22,-65],
+      [-130,40],[130,-40],[130,40],[-130,-40],
+      [-160,160],[160,-160],[-160,-160],[160,160],
+      [10,120],[-10,-120],[10,-120],[-10,120],
+      [-205,260],[205,-260],[-205,-260],[205,260],
+      [-95,310],[95,-310],[-75,290],[75,-290],
+      [-40,-95],[40,95],[60,-15],[-60,15]
+    ];
+    const barrelBodies = [], barrelLids = [], barrelBands = [];
+    for (const [x, z] of barrels) {
+      const groupCount = 1 + Math.floor((Math.abs(x*7 + z*3) % 3));
+      for (let i = 0; i < groupCount; i++) {
+        const ox = (i % 2) * 0.95;
+        const oz = (i >> 1) * 0.95;
+        barrelBodies.push({ x: x + ox, y: 0.525, z: z + oz });
+        barrelLids.push({ x: x + ox, y: 1.06, z: z + oz });
+        barrelBands.push({ x: x + ox, y: 0.30, z: z + oz, rx: Math.PI/2 });
+        barrelBands.push({ x: x + ox, y: 0.75, z: z + oz, rx: Math.PI/2 });
+      }
+    }
+    addInstanced(gBarrelBody, matBarrel, barrelBodies);
+    addInstanced(gBarrelLid, matBarrelTop, barrelLids);
+    addInstanced(gBarrelBand, matRustMtl, barrelBands);
+
+    // ---- Sandbag perimeters around several spots (low decorative) ----
+    const sandbagRings = [
+      [-20,20],[20,-20],[40,110],[-40,-110],[170,170],[-170,-170],
+      [-80,-80],[80,80],[100,-200],[-100,200]
+    ];
+    const sandbagXf = [];
+    for (const [cx, cz] of sandbagRings) {
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const r = 3.4;
+        sandbagXf.push({
+          x: cx + Math.cos(a) * r, y: 0.16, z: cz + Math.sin(a) * r,
+          ry: a + Math.PI/2
+        });
+        if (i % 2 === 0) {
+          sandbagXf.push({
+            x: cx + Math.cos(a) * r, y: 0.48, z: cz + Math.sin(a) * r,
+            ry: a + Math.PI/2 + 0.3
+          });
+        }
+      }
+    }
+    addInstanced(gSandbag, matSandbag, sandbagXf);
+
+    // ---- AC units, vents, antennas, pipes on rooftops ----
+    // We seed roughly where buildings/towers exist. Coordinates picked from
+    // map.build() above so detail lines up with structures.
+    const buildingTops = [
+      [-45,-20,5.6],[45,20,5.6],[-20,55,7.6],[25,-55,6.6],
+      [-30,130,5.6],[30,130,5.6],[-30,-130,5.6],[30,-130,5.6],
+      [-125,60,5.6],[125,-60,5.6],[180,0,7.6],[-180,0,7.6],
+      [180,35,5.6],[180,-35,5.6],[-180,35,5.6],[-180,-35,5.6]
+    ];
+    const acXf = [], acVentXf = [], acFanXf = [];
+    const antXf = [], antPadXf = [];
+    const pipeXf = [], elbowXf = [];
+    for (const [bx, bz, by] of buildingTops) {
+      // Two AC units offset on the roof
+      acXf.push({ x: bx - 3.0, y: by + 0.45, z: bz + 2.0 });
+      acVentXf.push({ x: bx - 3.0, y: by + 0.94, z: bz + 2.0 });
+      acFanXf.push({ x: bx - 3.0, y: by + 0.99, z: bz + 2.0, rx: 0 });
+      acXf.push({ x: bx + 3.5, y: by + 0.45, z: bz - 2.5, ry: 0.3 });
+      acVentXf.push({ x: bx + 3.5, y: by + 0.94, z: bz - 2.5, ry: 0.3 });
+      acFanXf.push({ x: bx + 3.5, y: by + 0.99, z: bz - 2.5 });
+      // Antenna mast
+      antXf.push({ x: bx + 2.0, y: by + 1.65, z: bz + 3.0 });
+      antPadXf.push({ x: bx + 2.0, y: by + 0.10, z: bz + 3.0 });
+      // Pipe runs (3 segments)
+      for (let i = 0; i < 3; i++) {
+        pipeXf.push({ x: bx - 4.0, y: by + 0.5 + i * 0.95, z: bz - 3.0 });
+      }
+      elbowXf.push({ x: bx - 4.0, y: by + 0.5, z: bz - 3.0 });
+      elbowXf.push({ x: bx - 4.0, y: by + 3.35, z: bz - 3.0 });
+    }
+    addInstanced(gAcUnit, matAcUnit, acXf);
+    addInstanced(gAcVent, matAcVent, acVentXf);
+    addInstanced(gAcFan,  matAcVent, acFanXf);
+    addInstanced(gAntenna, matAntenna, antXf);
+    addInstanced(gAntennaPad, matAntenna, antPadXf);
+    addInstanced(gPipeSeg, matPipe, pipeXf);
+    addInstanced(gPipeElbow, matPipe, elbowXf);
+
+    // ---- Lit windows on building walls ----
+    // Tile a few rows of glowing windows on each side of each building top.
+    const windowXf = [], windowFrameXf = [], windowOffXf = [];
+    for (const [bx, bz, by] of buildingTops) {
+      const halfW = 6.5, halfD = 5.5;
+      for (let row = 0; row < 2; row++) {
+        const wy = 1.5 + row * 1.6;
+        if (wy >= by - 0.4) continue;
+        for (let col = -1; col <= 1; col++) {
+          if (col === 0) continue;
+          const wx = bx + col * 2.6;
+          // South face
+          const lit1 = ((row + col + bx + bz) | 0) % 3 !== 0;
+          (lit1 ? windowXf : windowOffXf).push({ x: wx, y: wy, z: bz - halfD - 0.26, ry: Math.PI });
+          windowFrameXf.push({ x: wx, y: wy, z: bz - halfD - 0.27, ry: Math.PI });
+          // North face
+          const lit2 = ((row * 3 + col * 2 + bx) | 0) % 3 !== 0;
+          (lit2 ? windowXf : windowOffXf).push({ x: wx, y: wy, z: bz + halfD + 0.26 });
+          windowFrameXf.push({ x: wx, y: wy, z: bz + halfD + 0.27 });
+        }
+        // East/west single windows
+        const lit3 = ((row + bx) | 0) % 2 === 0;
+        (lit3 ? windowXf : windowOffXf).push({ x: bx + halfW + 0.26, y: wy, z: bz, ry: -Math.PI/2 });
+        windowFrameXf.push({ x: bx + halfW + 0.27, y: wy, z: bz, ry: -Math.PI/2 });
+        const lit4 = ((row * 2 + bz) | 0) % 2 === 1;
+        (lit4 ? windowXf : windowOffXf).push({ x: bx - halfW - 0.26, y: wy, z: bz, ry: Math.PI/2 });
+        windowFrameXf.push({ x: bx - halfW - 0.27, y: wy, z: bz, ry: Math.PI/2 });
+      }
+    }
+    addInstanced(gWindowFrame, matAcVent, windowFrameXf);
+    addInstanced(gWindow, matWindow, windowXf);
+    addInstanced(gWindow, matWindowOff, windowOffXf);
+
+    // ---- Traffic cones around plazas / lanes ----
+    const coneXf = [];
+    for (let i = 0; i < 60; i++) {
+      const a = (i / 60) * Math.PI * 2;
+      const r = 14 + (i % 5) * 0.4;
+      coneXf.push({ x: Math.cos(a) * r, y: 0.42, z: Math.sin(a) * r });
+    }
+    for (const [cx, cz] of [[0,165],[0,-165],[0,240],[0,-240]]) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        coneXf.push({ x: cx + Math.cos(a) * 8, y: 0.42, z: cz + Math.sin(a) * 8 });
+      }
+    }
+    addInstanced(gCone, matCone, coneXf);
+
+    // ---- Vegetation tufts (cheap spheres, instanced) ----
+    const folXf = [], folXfS = [];
+    for (let i = 0; i < 220; i++) {
+      // Pseudo-random scattering with deterministic seed
+      const a = (i * 73.13) % (Math.PI * 2);
+      const rr = 60 + ((i * 17) % 280);
+      const x = Math.cos(a) * rr + ((i * 31) % 17) - 8;
+      const z = Math.sin(a) * rr + ((i * 41) % 19) - 9;
+      // Avoid central plaza
+      if (Math.abs(x) < 14 && Math.abs(z) < 14) continue;
+      folXf.push({ x, y: 0.55, z, sy: 0.7 + ((i * 13) % 7) * 0.05 });
+      if (i % 3 === 0) folXfS.push({ x: x + 1.1, y: 0.42, z: z - 0.7 });
+    }
+    addInstanced(gFoliage, matFoliage, folXf);
+    addInstanced(gFoliageS, matFoliageDark, folXfS);
+
+    // ---- Wood pallets stacked near crates ----
+    const palletXf = [], palletPlankXf = [];
+    const palletSpots = [
+      [-55,-12],[55,12],[-12,40],[12,-40],
+      [-65,24],[65,-24],[-72,72],[72,-72],
+      [-15,110],[15,-110],[-50,150],[50,-150]
+    ];
+    for (const [px, pz] of palletSpots) {
+      for (let s = 0; s < 2; s++) {
+        const py = 0.07 + s * 0.18;
+        palletXf.push({ x: px, y: py, z: pz, ry: s * 0.3 });
+        for (let pl = -2; pl <= 2; pl += 2) {
+          palletPlankXf.push({ x: px + pl * 0.22, y: py + 0.05, z: pz, ry: s * 0.3 });
+        }
+      }
+    }
+    addInstanced(gPallet, matPallet, palletXf);
+    addInstanced(gPalletPlank, matPallet, palletPlankXf);
+
+    // ---- Yellow road stripes radiating from central plaza ----
+    const stripeXf = [];
+    for (let r = 18; r < 80; r += 6) {
+      for (const ang of [0, Math.PI/2, Math.PI, -Math.PI/2]) {
+        stripeXf.push({
+          x: Math.cos(ang) * r, y: 0.04, z: Math.sin(ang) * r,
+          rx: -Math.PI/2, rz: ang
+        });
+      }
+    }
+    addInstanced(gStripe, matStripe, stripeXf);
+
+    // ---- Manhole covers ----
+    const manholeXf = [];
+    for (const [mx, mz] of [[16,0],[-16,0],[0,16],[0,-16],[60,0],[-60,0],[0,60],[0,-60]]) {
+      manholeXf.push({ x: mx, y: 0.03, z: mz, rx: -Math.PI/2 });
+    }
+    addInstanced(gManhole, matRustMtl, manholeXf);
+  }
+
   _buildSpatialGrid() {
     const CELL = 8;
     this._gridCell = CELL;
@@ -4766,10 +5068,15 @@ class WeaponSystem {
     this.targetOffset = new THREE.Vector3();
     this.kickPos = new THREE.Vector3();
     this.kickRot = new THREE.Vector3();
+    this.kickPosVel = new THREE.Vector3();
+    this.kickRotVel = new THREE.Vector3();
+    this.fireShake = 0;
+    this.fireShakeT = 0;
     this.muzzleFlash = null;
     this.muzzleLight = null;
     this.muzzleTimer = 0;
     this._sprintLerp = 0;
+    this._initBrassPool();
     this.buildGun();
   }
   get def() { return WEAPONS[this.state.currentWeaponId]; }
@@ -4891,6 +5198,8 @@ class WeaponSystem {
     // Charging handle / bolt
     const bolt = new THREE.Mesh(new THREE.BoxGeometry(0.018*s, 0.024*s, 0.05*s), matMetal);
     bolt.position.set(0.044*s, 0.018*s, 0.04*s); this.viewModel.add(bolt);
+    this._boltMesh = bolt; this._boltRestZ = bolt.position.z; this._boltCycle = 0;
+    this._triggerMesh = null; // assigned below
     // Ejection port (subtle inset)
     const ejector = new THREE.Mesh(new THREE.BoxGeometry(0.005*s, 0.022*s, 0.06*s), matPolymer);
     ejector.position.set(0.038*s, 0.015*s, -0.05*s); this.viewModel.add(ejector);
@@ -4899,6 +5208,7 @@ class WeaponSystem {
     triggerGuard.rotation.x = Math.PI/2; triggerGuard.position.set(0, -0.034*s, 0.02*s); this.viewModel.add(triggerGuard);
     const trigger = new THREE.Mesh(new THREE.BoxGeometry(0.008*s, 0.020*s, 0.008*s), matMetal);
     trigger.position.set(0, -0.028*s, 0.02*s); this.viewModel.add(trigger);
+    this._triggerMesh = trigger; this._triggerRestZ = trigger.position.z; this._triggerPull = 0;
     // Pistol grip
     const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04*s, 0.10*s, 0.05*s), matPolymer);
     grip.position.set(0, -0.07*s, 0.06*s); grip.rotation.x = 0.18; this.viewModel.add(grip);
@@ -5256,10 +5566,13 @@ class WeaponSystem {
     const plate = new THREE.Mesh(new THREE.BoxGeometry(0.002*s, 0.014*s, 0.05*s), matMetal);
     plate.position.set(0.039*s, 0.012*s, -0.10*s); this.viewModel.add(plate);
     // Muzzle flash + point light (better glow)
-    const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.18),
-      new THREE.MeshBasicMaterial({ color: 0xffdd66, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    const flashMat = new THREE.MeshBasicMaterial({ color: 0xfff1a8, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+    const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.26), flashMat);
     flash.position.set(0, 0.01*s, -0.55*s); flash.visible = false;
     this.viewModel.add(flash);
+    const flash2 = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), flashMat);
+    flash2.position.set(0, 0.01*s, -0.55*s); flash2.rotation.z = Math.PI/4; flash2.visible = false;
+    this.viewModel.add(flash2); this._flash2 = flash2;
     this.muzzleFlash = flash;
     const light = new THREE.PointLight(0xffcc66, 0, 6);
     light.position.set(0, 0.02*s, -0.55*s);
@@ -5344,6 +5657,89 @@ class WeaponSystem {
     hole.position.addScaledVector(n, 0.006);
     hole.visible = true;
   }
+
+  // ---- Brass shell ejection (pooled, world-space) ----
+  _initBrassPool() {
+    this._BRASS_MAX = 24;
+    const geo = new THREE.CylinderGeometry(0.012, 0.012, 0.045, 6);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xd9a83a, roughness: 0.35, metalness: 0.95 });
+    const im = new THREE.InstancedMesh(geo, mat, this._BRASS_MAX);
+    im.frustumCulled = false;
+    im.castShadow = false; im.receiveShadow = false;
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.scene.add(im);
+    this._brassMesh = im;
+    this._brassObj = new THREE.Object3D();
+    this._brass = [];
+    // Pre-hide all instances by scaling to zero
+    const z = new THREE.Object3D(); z.scale.set(0,0,0); z.updateMatrix();
+    for (let i = 0; i < this._BRASS_MAX; i++) im.setMatrixAt(i, z.matrix);
+    im.instanceMatrix.needsUpdate = true;
+    this._brassNext = 0;
+  }
+  _ejectBrass() {
+    if (!this._brassMesh) return;
+    const d = this.def;
+    if (d.isMelee || d.isMedpack || d.isTurret || d.isOrbital) return;
+    // Get ejection origin (right side of receiver) in world space.
+    const local = new THREE.Vector3(0.04 * (d.scale || 1), 0.02 * (d.scale || 1), 0);
+    this.viewModel.localToWorld(local);
+    // Eject to the camera's right + slight up.
+    const right = new THREE.Vector3(); this.camera.getWorldDirection(right);
+    const up = new THREE.Vector3(0, 1, 0);
+    const sideways = new THREE.Vector3().crossVectors(right, up).normalize();
+    const vel = new THREE.Vector3()
+      .addScaledVector(sideways, 2.4 + Math.random() * 1.0)
+      .addScaledVector(up, 1.8 + Math.random() * 0.8)
+      .addScaledVector(right, -0.4 - Math.random() * 0.3);
+    const slot = this._brassNext % this._BRASS_MAX;
+    this._brassNext++;
+    this._brass[slot] = {
+      pos: local.clone(),
+      vel,
+      rot: new THREE.Euler(Math.random()*Math.PI, Math.random()*Math.PI, 0),
+      angVel: new THREE.Vector3((Math.random()-0.5)*20, (Math.random()-0.5)*15, (Math.random()-0.5)*20),
+      life: 0,
+      ttl: 1.6,
+      idx: slot
+    };
+  }
+  _updateBrass(dt) {
+    if (!this._brassMesh) return;
+    const obj = this._brassObj;
+    let dirty = false;
+    for (let i = 0; i < this._BRASS_MAX; i++) {
+      const b = this._brass[i];
+      if (!b) continue;
+      b.life += dt;
+      if (b.life >= b.ttl) {
+        // Hide
+        obj.scale.set(0,0,0); obj.position.set(0,0,0); obj.rotation.set(0,0,0);
+        obj.updateMatrix();
+        this._brassMesh.setMatrixAt(i, obj.matrix);
+        this._brass[i] = null;
+        dirty = true;
+        continue;
+      }
+      // Physics
+      b.vel.y -= 9.8 * dt;
+      b.pos.addScaledVector(b.vel, dt);
+      b.rot.x += b.angVel.x * dt;
+      b.rot.y += b.angVel.y * dt;
+      b.rot.z += b.angVel.z * dt;
+      // Ground bounce
+      if (b.pos.y < 0.02) { b.pos.y = 0.02; b.vel.y = -b.vel.y * 0.32; b.vel.x *= 0.7; b.vel.z *= 0.7; b.angVel.multiplyScalar(0.6); }
+      obj.position.copy(b.pos);
+      obj.rotation.copy(b.rot);
+      const fade = b.life > b.ttl - 0.3 ? Math.max(0, (b.ttl - b.life) / 0.3) : 1;
+      obj.scale.setScalar(fade);
+      obj.updateMatrix();
+      this._brassMesh.setMatrixAt(i, obj.matrix);
+      dirty = true;
+    }
+    if (dirty) this._brassMesh.instanceMatrix.needsUpdate = true;
+  }
+
   _getMuzzleWorld() {
     const d = this.def;
     const s = d.scale || 1;
@@ -5515,12 +5911,15 @@ class WeaponSystem {
     s.shotsFired++;
     // Visual viewmodel kick — toned down ~45% from the prior aggressive pass.
     const kickScale = (d.isMedpack ? 0 : (d.damage >= 80 ? 1.6 : (d.damage >= 50 ? 1.2 : (d.damage >= 25 ? 0.95 : 0.8)))) * _recScale * RECOIL_GLOBAL;
-    this.kickPos.z += 0.16 * d.scale * kickScale;
-    this.kickPos.y += 0.028 * kickScale;
-    this.kickPos.x += (Math.random() - 0.5) * 0.020 * kickScale;
-    this.kickRot.x += 0.20 * kickScale;
-    this.kickRot.z += (Math.random() - 0.5) * 0.11 * kickScale;
-    this.kickRot.y += (Math.random() - 0.5) * 0.05 * kickScale;
+    // Spring impulse (velocity kick) — gives a damped, physical recoil feel
+    this.kickPosVel.z += 4.2 * d.scale * kickScale;
+    this.kickPosVel.y += 0.9 * kickScale;
+    this.kickPosVel.x += (Math.random() - 0.5) * 0.7 * kickScale;
+    this.kickRotVel.x += 5.5 * kickScale;
+    this.kickRotVel.z += (Math.random() - 0.5) * 3.0 * kickScale;
+    this.kickRotVel.y += (Math.random() - 0.5) * 1.6 * kickScale;
+    this.fireShake = Math.min(1, this.fireShake + 0.45 * kickScale);
+    this.fireShakeT = 0;
     this.camera.getWorldPosition(this.rayOrigin);
     this.camera.getWorldDirection(this.rayDir);
     const baseSpread = (s.isAiming ? d.adsSpread : d.spread) * _att.spreadMult;
@@ -5545,10 +5944,15 @@ class WeaponSystem {
       this._scratchDir.normalize();
       this.fireOneBullet(this.rayOrigin, this._scratchDir, d, s, allTargets, muzzle);
     }
+    this._ejectBrass();
+    this._boltCycle = 0.07;
+    this._triggerPull = 0.06;
     if (this.muzzleFlash) {
       this.muzzleFlash.visible = true;
       this.muzzleFlash.rotation.z = Math.random() * Math.PI * 2;
-      this.muzzleFlash.scale.setScalar(0.9 + Math.random() * 0.5);
+      const mfScale = 0.9 + Math.random() * 0.7;
+      this.muzzleFlash.scale.setScalar(mfScale);
+      if (this._flash2) { this._flash2.visible = true; this._flash2.scale.setScalar(mfScale * 0.7); this._flash2.rotation.z = Math.random() * Math.PI * 2; }
       this.muzzleTimer = 0.05;
       if (this.muzzleLight) this.muzzleLight.intensity = 3.0;
     }
@@ -5647,11 +6051,27 @@ class WeaponSystem {
       const r = Math.sign(this.recoilYaw) * Math.min(Math.abs(this.recoilYaw), rec * 0.5);
       this.recoilYaw -= r; this.player.state.yaw -= r;
     }
+    this._updateBrass(dt);
+    if (this._boltMesh && this._boltCycle > 0) {
+      this._boltCycle -= dt;
+      const k = Math.max(0, this._boltCycle / 0.07);
+      this._boltMesh.position.z = this._boltRestZ + Math.sin(k * Math.PI) * 0.05;
+    } else if (this._boltMesh) {
+      this._boltMesh.position.z = this._boltRestZ;
+    }
+    if (this._triggerMesh && this._triggerPull > 0) {
+      this._triggerPull -= dt;
+      const k = Math.max(0, this._triggerPull / 0.06);
+      this._triggerMesh.position.z = this._triggerRestZ - (1 - k) * 0.006;
+    } else if (this._triggerMesh) {
+      this._triggerMesh.position.z = this._triggerRestZ;
+    }
     if (this.muzzleTimer > 0) {
       this.muzzleTimer -= dt;
       if (this.muzzleLight) this.muzzleLight.intensity *= Math.max(0, 1 - 18 * dt);
       if (this.muzzleTimer <= 0) {
         if (this.muzzleFlash) this.muzzleFlash.visible = false;
+        if (this._flash2) this._flash2.visible = false;
         if (this.muzzleLight) this.muzzleLight.intensity = 0;
       }
     }
@@ -5783,14 +6203,35 @@ class WeaponSystem {
     const sprintTiltZ = this._sprintLerp * -0.45;
     const sprintTiltY = this._sprintLerp * 0.35;
     // Weapon rotation: kick + sprint tilt + lean cant
+    // Damped-spring integration toward zero for kickPos/kickRot.
+    // k = stiffness, c = damping (tuned near critical for snappy-but-soft recoil)
+    const _kP = 140, _cP = 20;   // position spring
+    const _kR = 180, _cR = 22;   // rotation spring
+    const _stepDt = Math.min(dt, 1/60);
+    this.kickPosVel.x += (-_kP * this.kickPos.x - _cP * this.kickPosVel.x) * _stepDt;
+    this.kickPosVel.y += (-_kP * this.kickPos.y - _cP * this.kickPosVel.y) * _stepDt;
+    this.kickPosVel.z += (-_kP * this.kickPos.z - _cP * this.kickPosVel.z) * _stepDt;
+    this.kickPos.x += this.kickPosVel.x * _stepDt;
+    this.kickPos.y += this.kickPosVel.y * _stepDt;
+    this.kickPos.z += this.kickPosVel.z * _stepDt;
+    this.kickRotVel.x += (-_kR * this.kickRot.x - _cR * this.kickRotVel.x) * _stepDt;
+    this.kickRotVel.y += (-_kR * this.kickRot.y - _cR * this.kickRotVel.y) * _stepDt;
+    this.kickRotVel.z += (-_kR * this.kickRot.z - _cR * this.kickRotVel.z) * _stepDt;
+    this.kickRot.x += this.kickRotVel.x * _stepDt;
+    this.kickRot.y += this.kickRotVel.y * _stepDt;
+    this.kickRot.z += this.kickRotVel.z * _stepDt;
+    // Fire-driven cosmetic camera/viewmodel sway (decays quickly)
+    this.fireShakeT += dt;
+    this.fireShake *= Math.max(0, 1 - 6 * dt);
+    const _fs = this.fireShake;
+    const _fsX = Math.sin(this.fireShakeT * 47) * 0.012 * _fs;
+    const _fsY = Math.cos(this.fireShakeT * 39) * 0.010 * _fs;
+    const _fsZ = Math.sin(this.fireShakeT * 31) * 0.018 * _fs;
     this.viewModel.rotation.set(
-      this.kickRot.x + Math.sin(sway * 1.1) * 0.01 + this.player.bodyLeanTilt * 0.5,
-      this.kickRot.y + sprintTiltY + Math.cos(sway * 0.7) * 0.01,
-      this.kickRot.z + sprintTiltZ + lean * LEAN_WEAPON_ROLL
+      this.kickRot.x + Math.sin(sway * 1.1) * 0.01 + this.player.bodyLeanTilt * 0.5 + _fsX,
+      this.kickRot.y + sprintTiltY + Math.cos(sway * 0.7) * 0.01 + _fsY,
+      this.kickRot.z + sprintTiltZ + lean * LEAN_WEAPON_ROLL + _fsZ
     );
-    const decay = Math.min(1, 9 * dt);
-    this.kickPos.multiplyScalar(1 - decay);
-    this.kickRot.multiplyScalar(1 - Math.min(1, 7 * dt));
   }
 }
 
@@ -7849,7 +8290,6 @@ class CameraController {
   }
   isFreeCam() { return this.mode === 'free'; }
   update(dt, player) {
-    if (this.input.isKeyPressed('KeyV')) this.cycleMode();
     const baseFov = this.settings.get('fov');
     const fovAdd = (this.mode === 'first' ? player.sprintFovBoost : 0);
     const tgtFov = baseFov + fovAdd;
