@@ -1727,17 +1727,36 @@ const LADDER_DESCEND_SPEED = 5.5;
 // the head displaces much further sideways than a typical CS-style lean,
 // the camera rolls more, and the body tilts more so the silhouette
 // genuinely clears the cover.
-const LEAN_MAX_OFFSET    = 1.55;   // horizontal camera shift at full lean (m)
-const LEAN_MAX_ROLL      = 0.34;   // radians of camera roll at full lean
-const LEAN_MAX_BODY_TILT = 0.42;   // radians of forward pivot from hips
-const LEAN_HEAD_DROP     = 0.22;   // head drops as you lean (arc around shoulder)
-const LEAN_HEAD_IN       = 16.0;   // head lerp speed toward lean target (fast — head leads)
-const LEAN_HEAD_OUT      = 20.0;   // head returns even quicker
-const LEAN_SMOOTH_IN     = 5.5;    // body lerp speed toward lean target (slower — body follows)
-const LEAN_SMOOTH_OUT    = 9.0;    // body returns slightly faster than it moves out
-const LEAN_WEAPON_ROLL   = 0.36;   // gun cants with lean (radians)
-const LEAN_WEAPON_OFFSET = 0.18;   // gun also shifts with lean (m)
+// ---- LEAN TUNING (critically-damped spring model) ----
+// The head is treated as a point mass on a stiff spring that snaps to the
+// input target. The body is a heavier mass on a softer spring that chases
+// the HEAD (not the input), so it visibly lags behind by ~120ms — exactly
+// like a real shoulder peek where the skull arcs out before the torso
+// catches up. Critically-damped springs eliminate the jerky linear-lerp
+// "snap-to-target" feel and produce buttery, organic motion.
+const LEAN_MAX_OFFSET    = 1.62;   // horizontal camera shift at full lean (m)
+const LEAN_MAX_ROLL      = 0.30;   // radians of camera roll at full lean (slightly softer)
+const LEAN_MAX_BODY_TILT = 0.46;   // radians of forward pivot from hips
+const LEAN_HEAD_DROP     = 0.24;   // head drops as you lean (arc around shoulder)
+const LEAN_HEAD_RISE     = 0.07;   // brief upward arc as the head pivots out (shoulder fulcrum)
+const LEAN_FORWARD_ARC   = 0.26;   // how far the head pushes forward around the corner
+// Spring stiffness (k) and damping (c) — c ≈ 2*sqrt(k) is critically damped.
+const LEAN_HEAD_K        = 220;    // very stiff — head reacts almost instantly
+const LEAN_HEAD_C        = 30;     // critically damped (no overshoot, no jitter)
+const LEAN_BODY_K        = 55;     // softer — body sluggishly follows the head
+const LEAN_BODY_C        = 15;     // critically damped
+const LEAN_TILT_K        = 38;     // forward hip tilt spring
+const LEAN_TILT_C        = 12.5;
+const LEAN_ROLL_K        = 90;     // camera roll spring (smooth, not jerky)
+const LEAN_ROLL_C        = 19;
+const LEAN_WEAPON_ROLL   = 0.34;   // gun cants with lean (radians)
+const LEAN_WEAPON_OFFSET = 0.20;   // gun also shifts with lean (m)
+const LEAN_WEAPON_LAG_K  = 70;     // weapon drag spring (lags head a little)
+const LEAN_WEAPON_LAG_C  = 17;
 const LEAN_PROBE_PADDING = 0.18;   // keep this far from walls
+// Subtle micro-motion overlaid on the lean to make it feel alive
+const LEAN_BREATH_AMP    = 0.012;  // tiny breathing wobble at full lean
+const LEAN_BREATH_HZ     = 0.55;   // slow breath cycle
 
 // ---------- SPAWN POINTS ----------
 const SPAWN_POINTS = [
@@ -4114,12 +4133,18 @@ class PlayerController {
     // leanAmt: target input (-1..+1)
     // leanHead: head displacement value (fast — leads the peek)
     // leanSmoothed: body displacement value (slower — body lags behind head)
-    this.leanAmt = 0;           // raw input target
+    this.leanAmt = 0;           // raw input target (-1..+1)
     this.leanHead = 0;          // fast — what the camera (head) actually uses
+    this.leanHeadVel = 0;       // spring velocity for the head channel
     this.leanSmoothed = 0;      // slow — body/torso pivot follows the head
+    this.leanBodyVel = 0;       // spring velocity for the body channel
     this.leanClamped = 0;       // post collision-probe clamp on the head value (camera)
+    this.leanWeaponLag = 0;     // weapon-drag value (lags head; springy)
+    this.leanWeaponLagVel = 0;
     this.bodyLeanTilt = 0;      // for viewmodel forward pivot
-    this.rollAmt = 0;           // smoothed camera roll
+    this.bodyLeanTiltVel = 0;
+    this.rollAmt = 0;           // smoothed camera roll (spring)
+    this.rollAmtVel = 0;
     this.lastVelY = 0;
     this.landKick = 0;
     this.sprintFovBoost = 0;
@@ -4165,7 +4190,10 @@ class PlayerController {
     this.respawnTimer = 0;
     // Reset lean so you don't respawn mid-peek
     this.leanAmt = 0; this.leanHead = 0; this.leanSmoothed = 0; this.leanClamped = 0;
-    this.bodyLeanTilt = 0; this.rollAmt = 0;
+    this.leanHeadVel = 0; this.leanBodyVel = 0;
+    this.leanWeaponLag = 0; this.leanWeaponLagVel = 0;
+    this.bodyLeanTilt = 0; this.bodyLeanTiltVel = 0;
+    this.rollAmt = 0; this.rollAmtVel = 0;
   }
   takeDamage(amount, attackerName = 'Unknown') {
     if (this.state.isDead) return;
@@ -4459,26 +4487,42 @@ class PlayerController {
     // Suppress lean in states where it feels wrong
     if (this.isSprinting || this.state.isOnLadder || this.isSliding) leanTarget = 0;
     this.leanAmt = leanTarget;
-    // ---- TWO-CHANNEL LEAN: head leads, body follows ----
-    // The head channel (camera) uses a faster lerp so the eye/sight peeks
-    // around the corner first. The body channel (torso pivot, viewmodel,
-    // remote body lean, screen roll) uses a slower lerp, so the player's
-    // shoulders, gun and remote-visible body visibly lag behind the peek —
-    // exactly like a real corner peek.
-    const headLeaningIn = Math.abs(leanTarget) > Math.abs(this.leanHead);
-    const headLerp = headLeaningIn ? LEAN_HEAD_IN : LEAN_HEAD_OUT;
-    this.leanHead += (leanTarget - this.leanHead) * Math.min(1, headLerp * dt);
-    const bodyLeaningIn = Math.abs(leanTarget) > Math.abs(this.leanSmoothed);
-    const bodyLerp = bodyLeaningIn ? LEAN_SMOOTH_IN : LEAN_SMOOTH_OUT;
-    this.leanSmoothed += (leanTarget - this.leanSmoothed) * Math.min(1, bodyLerp * dt);
+    // ---- HEAD-LEADS-BODY LEAN (critically-damped springs) ----
+    // Each channel is integrated as a damped harmonic oscillator:
+    //   a = -k * (x - target) - c * v
+    // Critically-damped (c = 2*sqrt(k)) means: fast convergence, NO
+    // overshoot, NO "snap" jitter — the motion is buttery and organic.
+    // The HEAD spring is much stiffer than the BODY spring AND the BODY
+    // spring chases the HEAD (not the input target). This guarantees the
+    // head reaches the corner first; the body trails by ~120ms naturally.
+    // Substep at fixed 240Hz so spring stays stable for any framerate.
+    {
+      const sub = Math.max(1, Math.ceil(dt * 240));
+      const h = dt / sub;
+      for (let i = 0; i < sub; i++) {
+        // Head chases raw input (responsive eye/sight)
+        const hAcc = -LEAN_HEAD_K * (this.leanHead - leanTarget) - LEAN_HEAD_C * this.leanHeadVel;
+        this.leanHeadVel += hAcc * h;
+        this.leanHead    += this.leanHeadVel * h;
+        // Body chases the HEAD's CURRENT position (so it lags head naturally)
+        const bAcc = -LEAN_BODY_K * (this.leanSmoothed - this.leanHead) - LEAN_BODY_C * this.leanBodyVel;
+        this.leanBodyVel += bAcc * h;
+        this.leanSmoothed += this.leanBodyVel * h;
+        // Body forward-tilt — chases body lean (delayed twice from input)
+        const tiltTarget = this.leanSmoothed * LEAN_MAX_BODY_TILT;
+        const tAcc = -LEAN_TILT_K * (this.bodyLeanTilt - tiltTarget) - LEAN_TILT_C * this.bodyLeanTiltVel;
+        this.bodyLeanTiltVel += tAcc * h;
+        this.bodyLeanTilt    += this.bodyLeanTiltVel * h;
+        // Weapon-drag lag — sits between head & body so the gun feels weighty
+        const wAcc = -LEAN_WEAPON_LAG_K * (this.leanWeaponLag - this.leanSmoothed) - LEAN_WEAPON_LAG_C * this.leanWeaponLagVel;
+        this.leanWeaponLagVel += wAcc * h;
+        this.leanWeaponLag    += this.leanWeaponLagVel * h;
+      }
+    }
     // Collision-probed clamp on the HEAD position — that's what the camera uses.
     this.leanClamped = this._computeClampedLean(this.leanHead);
-    // Body forward-tilt LAGS the head: this makes the head visibly peek
-    // around the corner first, with the torso/weapon following a beat later.
-    const bodyTiltTarget = this.leanSmoothed * LEAN_MAX_BODY_TILT;
-    this.bodyLeanTilt += (bodyTiltTarget - this.bodyLeanTilt) * Math.min(1, 3.5 * dt);
     // Lean rustle sound on activation
-    if (Math.abs(this.leanHead) > 0.05 && clock.elapsed - this._leanSoundT > 0.25 && headLeaningIn) {
+    if (Math.abs(this.leanHead) > 0.05 && clock.elapsed - this._leanSoundT > 0.25 && Math.abs(leanTarget) > Math.abs(this.leanSmoothed)) {
       this._leanSoundT = clock.elapsed;
       if (SOUND) SOUND.leanRustle();
     }
@@ -4624,9 +4668,18 @@ class PlayerController {
       this._bobAmt *= Math.max(0, 1 - 10 * dt);
     }
     this.idleSwayT += dt;
-    // Smoothed camera roll from lean + slide
-    const targetRoll = this.leanSmoothed * LEAN_MAX_ROLL + this.slideTilt * 0.18;
-    this.rollAmt += (targetRoll - this.rollAmt) * Math.min(1, 12 * dt);
+    // Smoothed camera roll from lean + slide — critically-damped spring so
+    // the roll arc into and out of a peek is buttery (no linear-lerp jolt).
+    {
+      const targetRoll = this.leanSmoothed * LEAN_MAX_ROLL + this.slideTilt * 0.18;
+      const sub = Math.max(1, Math.ceil(dt * 240));
+      const h = dt / sub;
+      for (let i = 0; i < sub; i++) {
+        const a = -LEAN_ROLL_K * (this.rollAmt - targetRoll) - LEAN_ROLL_C * this.rollAmtVel;
+        this.rollAmtVel += a * h;
+        this.rollAmt    += this.rollAmtVel * h;
+      }
+    }
     const fovTarget = this.isSliding ? 14 : (this.isSprinting ? 8 : 0);
     this.sprintFovBoost += (fovTarget - this.sprintFovBoost) * Math.min(1, 6 * dt);
     // Camera placement
@@ -5756,7 +5809,8 @@ class RemotePlayerManager {
       shadows, _wid: wid || null, _weaponClass: weaponClass,
       nameSprite, nameTex,
       healthSprite: hb.sprite, healthCanvas: hb.canvas, healthCtx: hb.ctx, healthTex: hb.tex,
-      smoothedLean: 0, _lastHealth: -1, _lastVisible: true
+      smoothedLean: 0, smoothedLeanVel: 0, headLean: 0, headLeanVel: 0,
+      _lastHealth: -1, _lastVisible: true
     };
     this.models.set(id, entry);
     this.updateHealthBar(entry, 100);
@@ -5839,9 +5893,31 @@ class RemotePlayerManager {
       // SLOWER than the camera/head shift, so observers see the head clear
       // the corner before the torso swings out.
       const targetLean = data.lean || 0;
-      entry.smoothedLean += (targetLean - entry.smoothedLean) * Math.min(1, 4.5 * dt);
+      // Critically-damped springs: head channel snaps to network value;
+      // body chases head. Observers see the enemy's head clear the corner
+      // before the torso swings out — same head-leads-body model used
+      // locally, kept perfectly in sync visually.
+      {
+        const sub = Math.max(1, Math.ceil(dt * 240));
+        const h = dt / sub;
+        for (let i = 0; i < sub; i++) {
+          const aH = -LEAN_HEAD_K * (entry.headLean - targetLean) - LEAN_HEAD_C * entry.headLeanVel;
+          entry.headLeanVel += aH * h;
+          entry.headLean    += entry.headLeanVel * h;
+          const aB = -LEAN_BODY_K * (entry.smoothedLean - entry.headLean) - LEAN_BODY_C * entry.smoothedLeanVel;
+          entry.smoothedLeanVel += aB * h;
+          entry.smoothedLean    += entry.smoothedLeanVel * h;
+        }
+      }
+      // Body lags; head visually leads via separate head-bone tilt below.
       entry.bodyPivot.rotation.z = entry.smoothedLean * LEAN_MAX_ROLL * 1.4;
       entry.bodyPivot.position.x = entry.smoothedLean * LEAN_MAX_OFFSET * 0.4;
+      // Extra head-bone roll/offset using the FAST head channel — visible
+      // peek-ahead-of-body tell for enemies, drives the corner-peek mind-game.
+      if (entry.head) {
+        entry.head.rotation.z = (entry.headLean - entry.smoothedLean) * 0.55;
+        entry.head.position.x = (entry.headLean - entry.smoothedLean) * 0.18;
+      }
       this.updateHealthBar(entry, data.health ?? 100);
     }
   }
@@ -7594,13 +7670,23 @@ class WeaponSystem {
     }
     const sway = this.player.idleSwayT;
     const _swayDamp = this.state.isAiming ? 0.08 : 1.0;
-    this.targetOffset.x += Math.sin(sway * 0.9) * 0.004 * _swayDamp;
-    this.targetOffset.y += Math.cos(sway * 1.3) * 0.003 * _swayDamp;
-    // Lean-driven gun offset (Hazmob-style weapon canting)
-    const lean = this.player.leanClamped || 0;
+    // Richer idle sway: 3-frequency Lissajous + breathing rise/fall.
+    // Looks alive (not a static prop) without distracting from aiming.
+    this.targetOffset.x += (Math.sin(sway * 0.9) * 0.004 + Math.sin(sway * 0.31) * 0.002) * _swayDamp;
+    this.targetOffset.y += (Math.cos(sway * 1.3) * 0.003 + Math.sin(sway * 0.47 + 0.7) * 0.0025) * _swayDamp;
+    this.targetOffset.z += Math.sin(sway * 0.23) * 0.0015 * _swayDamp;
+    // Lean-driven gun offset — uses the WEAPON-LAG channel (springy chase
+    // of body lean), so the gun visibly trails the head out of cover and
+    // settles into place a heartbeat after the camera. Dramatic but smooth.
+    const lean = this.player.leanWeaponLag || 0;
+    const leanCam = this.player.leanClamped || 0;
     const _leanAdsDamp = this.state.isAiming ? 0.3 : 1.0;
     this.targetOffset.x += lean * LEAN_WEAPON_OFFSET * _leanAdsDamp;
-    this.targetOffset.y += Math.abs(lean) * -0.04 * _leanAdsDamp; // gun dips slightly as you lean
+    this.targetOffset.y += Math.abs(lean) * -0.05 * _leanAdsDamp; // gun dips slightly as you lean
+    // Tiny "swing-through" offset: the gun briefly pulls AWAY from the
+    // peek direction at the start of a lean (inertia), driven by the
+    // delta between camera lean and weapon-lag lean.
+    this.targetOffset.x += (leanCam - lean) * -0.10 * _leanAdsDamp;
     this.targetOffset.x += this.kickPos.x;
     this.targetOffset.y += this.kickPos.y;
     this.targetOffset.z += this.kickPos.z;
@@ -9811,30 +9897,46 @@ class CameraController {
       this.camera.updateProjectionMatrix();
     }
     // Base eye position (incorporates land kick, crouch, slide, head drop from lean)
+    // Real shoulder-pivot arc: as you peek, the head first rises a touch
+    // (because the neck rotates around the shoulder ball-joint) and THEN
+    // dips as the lean deepens. We bias the rise to early-lean (sin
+    // half-cycle) and apply the drop quadratically so it dominates at
+    // full lean. Result: a smooth, organic head trajectory.
     const leanMag = Math.abs(player.leanClamped);
-    const leanHeadDrop = leanMag * LEAN_HEAD_DROP;
-    const eyeY = player.state.position.y - PLAYER_HEIGHT + player.eyeHeight - player.landKick - leanHeadDrop;
+    const leanArcRise = Math.sin(Math.min(1, leanMag * 1.4) * Math.PI) * LEAN_HEAD_RISE;
+    const leanHeadDrop = (leanMag * leanMag) * LEAN_HEAD_DROP;
+    const eyeY = player.state.position.y - PLAYER_HEIGHT + player.eyeHeight - player.landKick - leanHeadDrop + leanArcRise;
     const bobX = Math.cos(player._bobTime) * player._bobAmt * 0.45;
     const bobY = Math.sin(player._bobTime * 2) * player._bobAmt;
-    // Build the sideways lean offset vector in world space
+    // Subtle breathing micro-motion that intensifies at full lean (you hold
+    // your breath less steady when craned around a corner).
+    const _now = (typeof performance !== 'undefined') ? performance.now() * 0.001 : 0;
+    const breath = Math.sin(_now * Math.PI * 2 * LEAN_BREATH_HZ) * LEAN_BREATH_AMP * (0.35 + leanMag * 0.9);
+    // Build the sideways lean offset vector in world space (use HEAD channel)
     this._leanRight.set(Math.cos(player.state.yaw), 0, -Math.sin(player.state.yaw));
     const leanOff = player.leanClamped * LEAN_MAX_OFFSET;
     const leanX = this._leanRight.x * leanOff;
     const leanZ = this._leanRight.z * leanOff;
-    // Add a stronger forward push so the head arcs AROUND the corner first
-    // (more like a real shoulder-pivoted peek — head leads, body follows).
+    // Forward push so the HEAD arcs AROUND the corner first (head-leads-body).
+    // Use the HEAD value, NOT the body value, so the eye truly leads.
     const forwardX = -Math.sin(player.state.yaw);
     const forwardZ = -Math.cos(player.state.yaw);
-    const leanForward = leanMag * 0.18;
+    const leanForward = leanMag * LEAN_FORWARD_ARC;
+    // Tiny yaw "look-into-the-peek" — the eyes naturally angle toward
+    // what they're peeking at. Driven by HEAD-minus-BODY so it appears
+    // only DURING the head-leading phase and fades as the body catches up.
+    const headLeadDelta = player.leanHead - player.leanSmoothed;
+    const peekYaw   =  headLeadDelta * 0.045;
+    const peekPitch = -Math.abs(headLeadDelta) * 0.025; // slight downward gaze when peeking out
     if (this.mode === 'first') {
       this.camera.position.set(player.state.position.x, eyeY, player.state.position.z);
       this.camera.position.x += bobX + leanX + forwardX * leanForward;
-      this.camera.position.y += bobY;
+      this.camera.position.y += bobY + breath;
       this.camera.position.z += leanZ + forwardZ * leanForward;
       this.camera.rotation.order = 'YXZ';
       this.camera.rotation.set(
-        player.state.pitch + player.bodyLeanTilt * 0.3,
-        player.state.yaw,
+        player.state.pitch + player.bodyLeanTilt * 0.3 + peekPitch,
+        player.state.yaw + peekYaw,
         player.rollAmt
       );
       this.localBody.visible = false;
